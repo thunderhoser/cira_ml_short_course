@@ -20,13 +20,6 @@ CLASSIFIERS = [
     'Programming Language :: Python :: 3'
 ]
 
-# You also need to install the following packages, which are not available in
-# pip.  They can both be installed by "git clone" and "python setup.py install",
-# the normal way one installs a GitHub package.
-#
-# https://github.com/matplotlib/basemap
-# https://github.com/tkrajina/srtm.py
-
 PACKAGE_REQUIREMENTS = [
     'numpy',
     'scipy',
@@ -41,8 +34,7 @@ PACKAGE_REQUIREMENTS = [
     'pandas',
     'shapely',
     'descartes',
-    'geopy',
-    'metpy'
+    'geopy'
 ]
 
 if __name__ == '__main__':

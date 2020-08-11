@@ -1,4 +1,4 @@
-"""Downloads storm data used to train and evaluate ML models.
+"""Downloads tabular data for ML models.
 
 This script is mostly copied from:
 
@@ -14,10 +14,6 @@ LOCAL_DIRECTORY_NAME = 'data'
 ONLINE_TABULAR_FILE_NAME = (
     'https://storage.googleapis.com/track_data_ncar_ams_3km_csv_small/'
     'track_data_ncar_ams_3km_csv_small.tar.gz'
-)
-ONLINE_IMAGE_FILE_NAME = (
-    'https://storage.googleapis.com/track_data_ncar_ams_3km_nc_small/'
-    'track_data_ncar_ams_3km_nc_small.tar.gz'
 )
 
 
@@ -64,19 +60,8 @@ def _run():
     print('Downloading data to: "{0:s}"...'.format(local_tabular_file_name))
     urlretrieve(ONLINE_TABULAR_FILE_NAME, local_tabular_file_name)
 
-    local_image_file_name = '{0:s}/{1:s}'.format(
-        LOCAL_DIRECTORY_NAME, os.path.split(ONLINE_IMAGE_FILE_NAME)[-1]
-    )
-    print('Downloading data to: "{0:s}"...'.format(local_image_file_name))
-    urlretrieve(ONLINE_IMAGE_FILE_NAME, local_image_file_name)
-
     print('Unzipping file: "{0:s}"...'.format(local_tabular_file_name))
     tar_file_handle = tarfile.open(local_tabular_file_name)
-    tar_file_handle.extractall(LOCAL_DIRECTORY_NAME)
-    tar_file_handle.close()
-
-    print('Unzipping file: "{0:s}"...'.format(local_image_file_name))
-    tar_file_handle = tarfile.open(local_image_file_name)
     tar_file_handle.extractall(LOCAL_DIRECTORY_NAME)
     tar_file_handle.close()
 
