@@ -397,7 +397,7 @@ def train_linear_regression(model_object, training_predictor_table,
     """
 
     model_object.fit(
-        X=training_predictor_table.as_matrix(),
+        X=training_predictor_table.to_numpy(),
         y=training_target_table[TARGET_NAME].values
     )
 
