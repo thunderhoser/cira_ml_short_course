@@ -10,6 +10,8 @@ from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from matplotlib import pyplot
 from cira_ml_short_course.plotting import evaluation_plotting
 
+# TODO(thunderhoser): Split this into different modules.
+
 # Variable names.
 METADATA_COLUMNS = [
     'Step_ID', 'Track_ID', 'Ensemble_Name', 'Ensemble_Member', 'Run_Date',
@@ -34,6 +36,11 @@ MSE_SKILL_SCORE_KEY = 'mse_skill_score'
 # Plotting constants.
 FIGURE_WIDTH_INCHES = 10
 FIGURE_HEIGHT_INCHES = 10
+
+BAR_GRAPH_COLOUR = numpy.array([27, 158, 119], dtype=float) / 255
+BAR_GRAPH_EDGE_WIDTH = 2
+BAR_GRAPH_FONT_SIZE = 14
+BAR_GRAPH_FONT_COLOUR = numpy.array([217, 95, 2], dtype=float) / 255
 
 FONT_SIZE = 20
 pyplot.rc('font', size=FONT_SIZE)
@@ -518,3 +525,49 @@ def evaluate_regression(
     pyplot.show()
 
     return evaluation_dict
+
+
+def plot_model_coefficients(model_object, predictor_names):
+    """Plots coefficients for linear- or logistic-regression model.
+
+    :param model_object: Trained instance of `sklearn.linear_model`.
+    :param predictor_names: 1-D list of predictor names, in the same order used
+        to train the model.
+    """
+
+    coefficients = model_object.coef_
+    num_dimensions = len(coefficients.shape)
+    if num_dimensions > 1:
+        coefficients = coefficients[0, ...]
+
+    num_predictors = len(predictor_names)
+    y_coords = numpy.linspace(
+        0, num_predictors - 1, num=num_predictors, dtype=float
+    )
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+
+    axes_object.barh(
+        y_coords, coefficients, color=BAR_GRAPH_COLOUR,
+        edgecolor=BAR_GRAPH_COLOUR, linewidth=BAR_GRAPH_EDGE_WIDTH
+    )
+
+    pyplot.xlabel('Coefficient')
+    pyplot.ylabel('Predictor variable')
+
+    pyplot.yticks([], [])
+    x_tick_values, _ = pyplot.xticks()
+    pyplot.xticks(x_tick_values, rotation=90)
+
+    x_min = numpy.percentile(coefficients, 1.)
+    x_max = numpy.percentile(coefficients, 99.)
+    pyplot.xlim([x_min, x_max])
+
+    for j in range(num_predictors):
+        axes_object.text(
+            0, y_coords[j], predictor_names[j], color=BAR_GRAPH_FONT_COLOUR,
+            horizontalalignment='center', verticalalignment='center',
+            fontsize=BAR_GRAPH_FONT_SIZE
+        )
