@@ -3,7 +3,8 @@
 from setuptools import setup
 
 PACKAGE_NAMES = [
-    'cira_ml_short_course', 'cira_ml_short_course.utils'
+    'cira_ml_short_course', 'cira_ml_short_course.utils',
+    'cira_ml_short_course.plotting'
 ]
 KEYWORDS = [
     'machine learning', 'deep learning', 'artificial intelligence',

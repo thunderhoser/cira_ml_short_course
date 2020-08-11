@@ -7,6 +7,9 @@ import calendar
 import numpy
 import pandas
 import sklearn
+import sklearn.linear_model
+from matplotlib import pyplot
+from cira_ml_short_course.plotting import evaluation_plotting
 
 # Variable names.
 METADATA_COLUMNS = [
@@ -22,6 +25,25 @@ EXTRANEOUS_COLUMNS = [
 
 TARGET_NAME = 'RVORT1_MAX-future_max'
 BINARIZED_TARGET_NAME = 'strong_future_rotation_flag'
+
+MAE_KEY = 'mean_absolute_error'
+RMSE_KEY = 'root_mean_squared_error'
+MEAN_BIAS_KEY = 'mean_bias'
+MAE_SKILL_SCORE_KEY = 'mae_skill_score'
+MSE_SKILL_SCORE_KEY = 'mse_skill_score'
+
+# Plotting constants.
+FIGURE_WIDTH_INCHES = 10
+FIGURE_HEIGHT_INCHES = 10
+
+FONT_SIZE = 20
+pyplot.rc('font', size=FONT_SIZE)
+pyplot.rc('axes', titlesize=FONT_SIZE)
+pyplot.rc('axes', labelsize=FONT_SIZE)
+pyplot.rc('xtick', labelsize=FONT_SIZE)
+pyplot.rc('ytick', labelsize=FONT_SIZE)
+pyplot.rc('legend', fontsize=FONT_SIZE)
+pyplot.rc('figure', titlesize=FONT_SIZE)
 
 # Misc constants.
 DATE_FORMAT = '%Y%m%d'
@@ -72,6 +94,52 @@ def _lambdas_to_sklearn_inputs(lambda1, lambda2):
     """
 
     return lambda1 + lambda2, lambda1 / (lambda1 + lambda2)
+
+
+def _get_reliability_curve(actual_values, predicted_values, num_bins,
+                           max_bin_edge, invert=False):
+    """Computes reliability curve for one target variable.
+
+    E = number of examples
+    B = number of bins
+
+    :param actual_values: length-E numpy array of actual values.
+    :param predicted_values: length-E numpy array of predicted values.
+    :param num_bins: Number of bins (points in curve).
+    :param max_bin_edge: Value at upper edge of last bin.
+    :param invert: Boolean flag.  If True, will return inverted reliability
+        curve, which bins by target value and relates target value to
+        conditional mean prediction.  If False, will return normal reliability
+        curve, which bins by predicted value and relates predicted value to
+        conditional mean observation (target).
+    :return: mean_predictions: length-B numpy array of x-coordinates.
+    :return: mean_observations: length-B numpy array of y-coordinates.
+    :return: example_counts: length-B numpy array with num examples in each bin.
+    """
+
+    max_bin_edge = max([max_bin_edge, numpy.finfo(float).eps])
+    bin_cutoffs = numpy.linspace(0., max_bin_edge, num=num_bins + 1)
+
+    bin_index_by_example = numpy.digitize(
+        actual_values if invert else predicted_values, bin_cutoffs, right=False
+    ) - 1
+    bin_index_by_example[bin_index_by_example < 0] = 0
+    bin_index_by_example[bin_index_by_example > num_bins - 1] = num_bins - 1
+
+    mean_predictions = numpy.full(num_bins, numpy.nan)
+    mean_observations = numpy.full(num_bins, numpy.nan)
+    example_counts = numpy.full(num_bins, -1, dtype=int)
+
+    for i in range(num_bins):
+        these_example_indices = numpy.where(bin_index_by_example == i)[0]
+
+        example_counts[i] = len(these_example_indices)
+        mean_predictions[i] = numpy.mean(
+            predicted_values[these_example_indices]
+        )
+        mean_observations[i] = numpy.mean(actual_values[these_example_indices])
+
+    return mean_predictions, mean_observations, example_counts
 
 
 def time_string_to_unix(time_string, time_format):
@@ -337,3 +405,119 @@ def train_linear_regression(model_object, training_predictor_table,
     )
 
     return model_object
+
+
+def evaluate_regression(
+        actual_values, predicted_values, mean_training_target_value,
+        verbose=True, create_plots=True, dataset_name=None):
+    """Evaluates regression model.
+
+    E = number of examples
+
+    :param actual_values: length-E numpy array of actual target values.
+    :param predicted_values: length-E numpy array of predictions.
+    :param mean_training_target_value: Mean target value in training data.
+    :param verbose: Boolean flag.  If True, will print results to command
+        window.
+    :param create_plots: Boolean flag.  If True, will create plots.
+    :param dataset_name: Dataset name (e.g., "validation").  Used only if
+        `create_plots == True or verbose == True`.
+    :return: evaluation_dict: Dictionary with the following keys.
+    evaluation_dict['mean_absolute_error']: Mean absolute error (MAE).
+    evaluation_dict['rmse']: Root mean squared error (RMSE).
+    evaluation_dict['mean_bias']: Mean bias (signed error).
+    evaluation_dict['mae_skill_score']: MAE skill score (fractional improvement
+        over climatology, in range -1...1).
+    evaluation_dict['mse_skill_score']: MSE skill score (fractional improvement
+        over climatology, in range -1...1).
+    """
+
+    signed_errors = predicted_values - actual_values
+    mean_bias = numpy.mean(signed_errors)
+    mean_absolute_error = numpy.mean(numpy.absolute(signed_errors))
+    rmse = numpy.sqrt(numpy.mean(signed_errors ** 2))
+
+    climo_signed_errors = mean_training_target_value - actual_values
+    climo_mae = numpy.mean(numpy.absolute(climo_signed_errors))
+    climo_mse = numpy.mean(climo_signed_errors ** 2)
+
+    mae_skill_score = (climo_mae - mean_absolute_error) / climo_mae
+    mse_skill_score = (climo_mse - rmse ** 2) / climo_mse
+
+    evaluation_dict = {
+        MAE_KEY: mean_absolute_error,
+        RMSE_KEY: rmse,
+        MEAN_BIAS_KEY: mean_bias,
+        MAE_SKILL_SCORE_KEY: mae_skill_score,
+        MSE_SKILL_SCORE_KEY: mse_skill_score
+    }
+
+    if verbose or create_plots:
+        dataset_name = dataset_name[0].upper() + dataset_name[1:]
+
+    if verbose:
+        print('{0:s} MAE (mean absolute error) = {1:.3e} s^-1'.format(
+            dataset_name, evaluation_dict[MAE_KEY]
+        ))
+        print('{0:s} MSE (mean squared error) = {1:.3e} s^-2'.format(
+            dataset_name, evaluation_dict[RMSE_KEY]
+        ))
+        print('{0:s} bias (mean signed error) = {1:.3e} s^-1'.format(
+            dataset_name, evaluation_dict[MEAN_BIAS_KEY]
+        ))
+
+        message_string = (
+            '{0:s} MAE skill score (improvement over climatology) = {1:.3f}'
+        ).format(dataset_name, evaluation_dict[MAE_SKILL_SCORE_KEY])
+        print(message_string)
+
+        message_string = (
+            '{0:s} MSE skill score (improvement over climatology) = {1:.3f}'
+        ).format(dataset_name, evaluation_dict[MSE_SKILL_SCORE_KEY])
+        print(message_string)
+
+    if not create_plots:
+        return evaluation_dict
+
+    mean_predictions, mean_observations, example_counts = (
+        _get_reliability_curve(
+            actual_values=actual_values, predicted_values=predicted_values,
+            num_bins=20, max_bin_edge=numpy.percentile(predicted_values, 99),
+            invert=False
+        )
+    )
+
+    inv_mean_observations, inv_example_counts = (
+        _get_reliability_curve(
+            actual_values=actual_values, predicted_values=predicted_values,
+            num_bins=20, max_bin_edge=numpy.percentile(actual_values, 99),
+            invert=True
+        )[1:]
+    )
+
+    concat_values = numpy.concatenate((mean_predictions, mean_observations))
+
+    figure_object, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+
+    evaluation_plotting.plot_attributes_diagram(
+        figure_object=figure_object, axes_object=axes_object,
+        mean_predictions=mean_predictions, mean_observations=mean_observations,
+        example_counts=example_counts,
+        inv_mean_observations=inv_mean_observations,
+        inv_example_counts=inv_example_counts,
+        mean_value_in_training=mean_training_target_value,
+        min_value_to_plot=0., max_value_to_plot=numpy.max(concat_values)
+    )
+
+    axes_object.set_xlabel(r'Forecast value (s$^{-1}$)')
+    axes_object.set_ylabel(r'Conditional mean observation (s$^{-1}$)')
+
+    title_string = '{0:s} attributes diagram for max future vorticity'.format(
+        dataset_name
+    )
+    axes_object.set_title(title_string)
+    pyplot.show()
+
+    return evaluation_dict
