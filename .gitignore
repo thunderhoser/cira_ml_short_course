@@ -1,0 +1,19 @@
+# Byte-compiled, optimized, and DLL files.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution and packaging.
+build/
+dist/
+*.egg-info/
+
+# IntelliJ things.
+.idea/
+*.iml
+
+# Slurm scripts.
+slurm/
+
+# Code that I don't intend to commit.
+ml4rt/*.py
