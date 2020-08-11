@@ -6,9 +6,7 @@ import time
 import calendar
 import numpy
 import pandas
-
-# Directories.
-DEFAULT_TABULAR_DIR_NAME = '../data/track_data_ncar_ams_3km_csv_small'
+import sklearn
 
 # Variable names.
 METADATA_COLUMNS = [
@@ -28,6 +26,9 @@ BINARIZED_TARGET_NAME = 'strong_future_rotation_flag'
 # Misc constants.
 DATE_FORMAT = '%Y%m%d'
 DATE_FORMAT_REGEX = '[0-9][0-9][0-9][0-9][0-1][0-9][0-3][0-9]'
+
+RANDOM_SEED = 6695
+LAMBDA_TOLERANCE = 1e-10
 
 
 def _tabular_file_name_to_date(csv_file_name):
@@ -61,6 +62,18 @@ def _remove_future_data(predictor_table):
     return predictor_table.drop(columns_to_remove, axis=1, inplace=False)
 
 
+def _lambdas_to_sklearn_inputs(lambda1, lambda2):
+    """Converts lambdas to input arguments for scikit-learn.
+
+    :param lambda1: L1-regularization weight.
+    :param lambda2: L2-regularization weight.
+    :return: alpha: Input arg for scikit-learn model.
+    :return: l1_ratio: Input arg for scikit-learn model.
+    """
+
+    return lambda1 + lambda2, lambda1 / (lambda1 + lambda2)
+
+
 def time_string_to_unix(time_string, time_format):
     """Converts time from string to Unix format.
 
@@ -89,13 +102,12 @@ def time_unix_to_string(unix_time_sec, time_format):
     return time.strftime(time_format, time.gmtime(unix_time_sec))
 
 
-def find_tabular_files(first_date_string, last_date_string,
-                       directory_name=DEFAULT_TABULAR_DIR_NAME):
+def find_tabular_files(directory_name, first_date_string, last_date_string):
     """Finds CSV files with tabular data.
 
+    :param directory_name: Name of directory with tabular files.
     :param first_date_string: First date ("yyyymmdd") in range.
     :param last_date_string: Last date ("yyyymmdd") in range.
-    :param directory_name: Name of directory with tabular files.
     :return: csv_file_names: 1-D list of paths to tabular files.
     """
 
@@ -199,3 +211,129 @@ def read_many_tabular_files(csv_file_names):
     )
 
     return metadata_table, predictor_table, target_table
+
+
+def normalize_predictors(predictor_table, normalization_dict=None):
+    """Normalizes predictors to z-scores.
+
+    :param predictor_table: See doc for `read_tabular_file`.
+    :param normalization_dict: Dictionary.  Each key is the name of a predictor
+        value, and the corresponding value is a length-2 numpy array with
+        [mean, standard deviation].  If `normalization_dict is None`, mean and
+        standard deviation will be computed for each predictor.
+    :return: predictor_table: Normalized version of input.
+    :return: normalization_dict: See doc for input variable.  If input was None,
+        this will be a newly created dictionary.  Otherwise, this will be the
+        same dictionary passed as input.
+    """
+
+    predictor_names = list(predictor_table)
+    num_predictors = len(predictor_names)
+
+    if normalization_dict is None:
+        normalization_dict = {}
+
+        for m in range(num_predictors):
+            this_mean = numpy.mean(predictor_table[predictor_names[m]].values)
+            this_stdev = numpy.std(
+                predictor_table[predictor_names[m]].values, ddof=1
+            )
+
+            normalization_dict[predictor_names[m]] = numpy.array(
+                [this_mean, this_stdev]
+            )
+
+    for m in range(num_predictors):
+        this_mean = normalization_dict[predictor_names[m]][0]
+        this_stdev = normalization_dict[predictor_names[m]][1]
+        these_norm_values = (
+            (predictor_table[predictor_names[m]].values - this_mean) /
+            this_stdev
+        )
+
+        predictor_table = predictor_table.assign(**{
+            predictor_names[m]: these_norm_values
+        })
+
+    return predictor_table, normalization_dict
+
+
+def denormalize_predictors(predictor_table, normalization_dict):
+    """Denormalizes predictors from z-scores back to original scales.
+
+    :param predictor_table: See doc for `normalize_predictors`.
+    :param normalization_dict: Same.
+    :return: predictor_table: Denormalized version of input.
+    """
+
+    predictor_names = list(predictor_table)
+    num_predictors = len(predictor_names)
+
+    for m in range(num_predictors):
+        this_mean = normalization_dict[predictor_names[m]][0]
+        this_stdev = normalization_dict[predictor_names[m]][1]
+        these_denorm_values = (
+            this_mean + this_stdev * predictor_table[predictor_names[m]].values
+        )
+
+        predictor_table = predictor_table.assign(**{
+            predictor_names[m]: these_denorm_values
+        })
+
+    return predictor_table
+
+
+def setup_linear_regression(lambda1=0., lambda2=0.):
+    """Sets up (but does not train) linear-regression model.
+
+    :param lambda1: L1-regularization weight.
+    :param lambda2: L2-regularization weight.
+    :return: model_object: Instance of `sklearn.linear_model`.
+    """
+
+    assert lambda1 >= 0
+    assert lambda2 >= 0
+
+    if lambda1 < LAMBDA_TOLERANCE and lambda2 < LAMBDA_TOLERANCE:
+        return sklearn.linear_model.LinearRegression(
+            fit_intercept=True, normalize=False
+        )
+
+    if lambda1 < LAMBDA_TOLERANCE:
+        return sklearn.linear_model.Ridge(
+            alpha=lambda2, fit_intercept=True, normalize=False,
+            random_state=RANDOM_SEED
+        )
+
+    if lambda2 < LAMBDA_TOLERANCE:
+        return sklearn.linear_model.Lasso(
+            alpha=lambda1, fit_intercept=True, normalize=False,
+            random_state=RANDOM_SEED
+        )
+
+    alpha, l1_ratio = _lambdas_to_sklearn_inputs(
+        lambda1=lambda1, lambda2=lambda2
+    )
+
+    return sklearn.linear_model.ElasticNet(
+        alpha=alpha, l1_ratio=l1_ratio, fit_intercept=True, normalize=False,
+        random_state=RANDOM_SEED
+    )
+
+
+def train_linear_regression(model_object, training_predictor_table,
+                            training_target_table):
+    """Trains linear-regression model.
+
+    :param model_object: Untrained model created by `setup_linear_regression`.
+    :param training_predictor_table: See doc for `read_feature_file`.
+    :param training_target_table: Same.
+    :return: model_object: Trained version of input.
+    """
+
+    model_object.fit(
+        X=training_predictor_table.as_matrix(),
+        y=training_target_table[TARGET_NAME].values
+    )
+
+    return model_object
