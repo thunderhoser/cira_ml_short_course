@@ -341,6 +341,8 @@ def plot_attributes_diagram(
     :return: mean_forecast_probs: See doc for `_get_points_in_relia_curve`.
     :return: mean_event_frequencies: Same.
     :return: num_examples_by_bin: Same.
+    :return: axes_object: Handle for main axes (instance of
+        `matplotlib.axes._subplots.AxesSubplot`).
     """
 
     mean_forecast_probs, mean_event_frequencies, num_examples_by_bin = (
@@ -365,4 +367,7 @@ def plot_attributes_diagram(
         axes_object=axes_object
     )
 
-    return mean_forecast_probs, mean_event_frequencies, num_examples_by_bin
+    return (
+        mean_forecast_probs, mean_event_frequencies, num_examples_by_bin,
+        axes_object
+    )

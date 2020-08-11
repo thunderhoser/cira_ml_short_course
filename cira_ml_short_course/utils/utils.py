@@ -811,6 +811,8 @@ def eval_binary_classifn(
         `create_plots == True or verbose == True`.
     """
 
+    dataset_name[0].upper() + dataset_name[1:]
+
     # Plot ROC curve.
     pofd_by_threshold, pod_by_threshold = roc_curves.plot_roc_curve(
         observed_labels=observed_labels,
@@ -846,7 +848,7 @@ def eval_binary_classifn(
         pyplot.title(title_string)
         pyplot.show()
 
-    mean_forecast_probs, event_frequencies, example_counts = (
+    mean_forecast_probs, event_frequencies, example_counts, axes_handle = (
         attr_diagrams.plot_attributes_diagram(
             observed_labels=observed_labels,
             forecast_probabilities=forecast_probabilities, num_bins=20
@@ -871,7 +873,7 @@ def eval_binary_classifn(
         title_string = (
             '{0:s} attributes diagram (Brier skill score = {1:.3f})'
         ).format(dataset_name, brier_skill_score)
-        pyplot.title(title_string)
+        axes_handle.set_title(title_string)
         pyplot.show()
 
     evaluation_dict = {
@@ -881,9 +883,6 @@ def eval_binary_classifn(
         BRIER_SCORE_KEY: brier_score,
         BRIER_SKILL_SCORE_KEY: brier_skill_score
     }
-
-    if verbose or create_plots:
-        dataset_name = dataset_name[0].upper() + dataset_name[1:]
 
     if verbose:
         print('{0:s} Max Peirce score (POD - POFD) = {1:.3f}'.format(
