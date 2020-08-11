@@ -3,8 +3,6 @@
 import numpy
 import shapely.geometry
 from descartes import PolygonPatch
-import matplotlib
-matplotlib.use('agg')
 import matplotlib.colors
 from matplotlib import pyplot
 
