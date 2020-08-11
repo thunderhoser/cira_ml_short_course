@@ -6,8 +6,7 @@ import time
 import calendar
 import numpy
 import pandas
-import sklearn
-import sklearn.linear_model
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from matplotlib import pyplot
 from cira_ml_short_course.plotting import evaluation_plotting
 
@@ -363,18 +362,16 @@ def setup_linear_regression(lambda1=0., lambda2=0.):
     assert lambda2 >= 0
 
     if lambda1 < LAMBDA_TOLERANCE and lambda2 < LAMBDA_TOLERANCE:
-        return sklearn.linear_model.LinearRegression(
-            fit_intercept=True, normalize=False
-        )
+        return LinearRegression(fit_intercept=True, normalize=False)
 
     if lambda1 < LAMBDA_TOLERANCE:
-        return sklearn.linear_model.Ridge(
+        return Ridge(
             alpha=lambda2, fit_intercept=True, normalize=False,
             random_state=RANDOM_SEED
         )
 
     if lambda2 < LAMBDA_TOLERANCE:
-        return sklearn.linear_model.Lasso(
+        return Lasso(
             alpha=lambda1, fit_intercept=True, normalize=False,
             random_state=RANDOM_SEED
         )
@@ -383,7 +380,7 @@ def setup_linear_regression(lambda1=0., lambda2=0.):
         lambda1=lambda1, lambda2=lambda2
     )
 
-    return sklearn.linear_model.ElasticNet(
+    return ElasticNet(
         alpha=alpha, l1_ratio=l1_ratio, fit_intercept=True, normalize=False,
         random_state=RANDOM_SEED
     )
