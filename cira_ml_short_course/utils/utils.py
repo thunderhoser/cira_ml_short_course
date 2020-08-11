@@ -8,7 +8,12 @@ import numpy
 import pandas
 import matplotlib.colors
 from matplotlib import pyplot
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from sklearn.metrics import auc as sklearn_auc
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, \
+    SGDClassifier
+from cira_ml_short_course.utils import roc_curves
+from cira_ml_short_course.utils import performance_diagrams as perf_diagrams
+from cira_ml_short_course.utils import attributes_diagrams as attr_diagrams
 from cira_ml_short_course.plotting import evaluation_plotting
 
 # TODO(thunderhoser): Split this into different modules.
@@ -33,6 +38,12 @@ RMSE_KEY = 'root_mean_squared_error'
 MEAN_BIAS_KEY = 'mean_bias'
 MAE_SKILL_SCORE_KEY = 'mae_skill_score'
 MSE_SKILL_SCORE_KEY = 'mse_skill_score'
+
+MAX_PEIRCE_SCORE_KEY = 'max_peirce_score'
+AUC_KEY = 'area_under_roc_curve'
+MAX_CSI_KEY = 'max_csi'
+BRIER_SCORE_KEY = 'brier_score'
+BRIER_SKILL_SCORE_KEY = 'brier_skill_score'
 
 # Plotting constants.
 FIGURE_WIDTH_INCHES = 10
@@ -459,7 +470,7 @@ def train_linear_regression(model_object, training_predictor_table,
     """Trains linear-regression model.
 
     :param model_object: Untrained model created by `setup_linear_regression`.
-    :param training_predictor_table: See doc for `read_feature_file`.
+    :param training_predictor_table: See doc for `read_tabular_file`.
     :param training_target_table: Same.
     :return: model_object: Trained version of input.
     """
@@ -722,3 +733,175 @@ def binarize_target_values(target_values, binarization_threshold):
     """
 
     return (target_values >= binarization_threshold).astype(int)
+
+
+def setup_logistic_regression(lambda1=0., lambda2=0.):
+    """Sets up (but does not train) logistic-regression model.
+
+    :param lambda1: L1-regularization weight.
+    :param lambda2: L2-regularization weight.
+    :return: model_object: Instance of `sklearn.linear_model.SGDClassifier`.
+    """
+
+    assert lambda1 >= 0
+    assert lambda2 >= 0
+
+    if lambda1 < LAMBDA_TOLERANCE and lambda2 < LAMBDA_TOLERANCE:
+        return SGDClassifier(
+            loss='log', penalty='none', fit_intercept=True, verbose=0,
+            random_state=RANDOM_SEED
+        )
+
+    if lambda1 < LAMBDA_TOLERANCE:
+        return SGDClassifier(
+            loss='log', penalty='l2', alpha=lambda2, fit_intercept=True,
+            verbose=0, random_state=RANDOM_SEED
+        )
+
+    if lambda2 < LAMBDA_TOLERANCE:
+        return SGDClassifier(
+            loss='log', penalty='l1', alpha=lambda1, fit_intercept=True,
+            verbose=0, random_state=RANDOM_SEED
+        )
+
+    alpha, l1_ratio = _lambdas_to_sklearn_inputs(
+        lambda1=lambda1, lambda2=lambda2
+    )
+
+    return SGDClassifier(
+        loss='log', penalty='elasticnet', alpha=alpha, l1_ratio=l1_ratio,
+        fit_intercept=True, verbose=0, random_state=RANDOM_SEED
+    )
+
+
+def train_logistic_regression(model_object, training_predictor_table,
+                              training_target_table):
+    """Trains logistic-regression model.
+
+    :param model_object: Untrained model created by `setup_logistic_regression`.
+    :param training_predictor_table: See doc for `read_tabular_file`.
+    :param training_target_table: Same.
+    :return: model_object: Trained version of input.
+    """
+
+    model_object.fit(
+        X=training_predictor_table.to_numpy(),
+        y=training_target_table[BINARIZED_TARGET_NAME].values
+    )
+
+    return model_object
+
+
+def eval_binary_classifn(
+        observed_labels, forecast_probabilities, training_event_frequency,
+        verbose=True, create_plots=True, dataset_name=None):
+    """Evaluates binary-classification model.
+
+    E = number of examples
+
+    :param observed_labels: length-E numpy array of observed labels (integers in
+        0...1, where 1 means that event occurred).
+    :param forecast_probabilities: length-E numpy array with forecast
+        probabilities of event (positive class).
+    :param training_event_frequency: Frequency of event in training data.
+    :param verbose: Boolean flag.  If True, will print results to command
+        window.
+    :param create_plots: Boolean flag.  If True, will create plots.
+    :param dataset_name: Dataset name (e.g., "validation").  Used only if
+        `create_plots == True or verbose == True`.
+    """
+
+    # Plot ROC curve.
+    pofd_by_threshold, pod_by_threshold = roc_curves.plot_roc_curve(
+        observed_labels=observed_labels,
+        forecast_probabilities=forecast_probabilities
+    )
+
+    max_peirce_score = numpy.nanmax(pod_by_threshold - pofd_by_threshold)
+    area_under_roc_curve = sklearn_auc(x=pofd_by_threshold, y=pod_by_threshold)
+
+    if create_plots:
+        title_string = '{0:s} ROC curve (AUC = {1:.3f})'.format(
+            dataset_name, area_under_roc_curve
+        )
+        pyplot.title(title_string)
+        pyplot.show()
+
+    pod_by_threshold, success_ratio_by_threshold = (
+        perf_diagrams.plot_performance_diagram(
+            observed_labels=observed_labels,
+            forecast_probabilities=forecast_probabilities
+        )
+    )
+
+    csi_by_threshold = (
+        (pod_by_threshold ** -1 + success_ratio_by_threshold ** -1 - 1) ** -1
+    )
+    max_csi = numpy.nanmax(csi_by_threshold)
+
+    if create_plots:
+        title_string = '{0:s} performance diagram (max CSI = {1:.3f})'.format(
+            dataset_name, max_csi
+        )
+        pyplot.title(title_string)
+        pyplot.show()
+
+    mean_forecast_probs, event_frequencies, example_counts = (
+        attr_diagrams.plot_attributes_diagram(
+            observed_labels=observed_labels,
+            forecast_probabilities=forecast_probabilities, num_bins=20
+        )
+    )
+
+    uncertainty = training_event_frequency * (1. - training_event_frequency)
+    this_numerator = numpy.nansum(
+        example_counts * (mean_forecast_probs - event_frequencies) ** 2
+    )
+    reliability = this_numerator / numpy.sum(example_counts)
+
+    this_numerator = numpy.nansum(
+        example_counts * (event_frequencies - training_event_frequency) ** 2
+    )
+    resolution = this_numerator / numpy.sum(example_counts)
+
+    brier_score = uncertainty + reliability - resolution
+    brier_skill_score = (resolution - reliability) / uncertainty
+
+    if create_plots:
+        title_string = (
+            '{0:s} attributes diagram (Brier skill score = {1:.3f})'
+        ).format(dataset_name, brier_skill_score)
+        pyplot.title(title_string)
+        pyplot.show()
+
+    evaluation_dict = {
+        MAX_PEIRCE_SCORE_KEY: max_peirce_score,
+        AUC_KEY: area_under_roc_curve,
+        MAX_CSI_KEY: max_csi,
+        BRIER_SCORE_KEY: brier_score,
+        BRIER_SKILL_SCORE_KEY: brier_skill_score
+    }
+
+    if verbose or create_plots:
+        dataset_name = dataset_name[0].upper() + dataset_name[1:]
+
+    if verbose:
+        print('{0:s} Max Peirce score (POD - POFD) = {1:.3f}'.format(
+            dataset_name, evaluation_dict[MAX_PEIRCE_SCORE_KEY]
+        ))
+        print('{0:s} AUC (area under ROC curve) = {1:.3f}'.format(
+            dataset_name, evaluation_dict[AUC_KEY]
+        ))
+        print('{0:s} Max CSI (critical success index) = {1:.3f}'.format(
+            dataset_name, evaluation_dict[MAX_CSI_KEY]
+        ))
+        print('{0:s} Brier score = {1:.3f}'.format(
+            dataset_name, evaluation_dict[BRIER_SCORE_KEY]
+        ))
+
+        message_string = (
+            '{0:s} Brier skill score (improvement over climatology) = {1:.3f}'
+        ).format(dataset_name, evaluation_dict[BRIER_SKILL_SCORE_KEY])
+        print(message_string)
+
+    return evaluation_dict
