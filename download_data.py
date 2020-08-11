@@ -67,14 +67,15 @@ def _run():
     local_image_file_name = '{0:s}/{1:s}'.format(
         LOCAL_DIRECTORY_NAME, os.path.split(ONLINE_IMAGE_FILE_NAME)[-1]
     )
-    print('Downloading data to: "{0:s}"...\n'.format(local_image_file_name))
+    print('Downloading data to: "{0:s}"...'.format(local_image_file_name))
     urlretrieve(ONLINE_IMAGE_FILE_NAME, local_image_file_name)
 
+    print('Unzipping file: "{0:s}"...'.format(local_tabular_file_name))
     tar_file_handle = tarfile.open(local_tabular_file_name)
     tar_file_handle.extractall(LOCAL_DIRECTORY_NAME)
     tar_file_handle.close()
-    print('\n')
 
+    print('Unzipping file: "{0:s}"...'.format(local_image_file_name))
     tar_file_handle = tarfile.open(local_image_file_name)
     tar_file_handle.extractall(LOCAL_DIRECTORY_NAME)
     tar_file_handle.close()
