@@ -6,8 +6,9 @@ import time
 import calendar
 import numpy
 import pandas
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+import matplotlib.colors
 from matplotlib import pyplot
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from cira_ml_short_course.plotting import evaluation_plotting
 
 # TODO(thunderhoser): Split this into different modules.
@@ -146,6 +147,66 @@ def _get_reliability_curve(actual_values, predicted_values, num_bins,
         mean_observations[i] = numpy.mean(actual_values[these_example_indices])
 
     return mean_predictions, mean_observations, example_counts
+
+
+def _add_colour_bar(
+        axes_object, colour_map_object, values_to_colour, min_colour_value,
+        max_colour_value, colour_norm_object=None,
+        orientation_string='vertical', extend_min=True, extend_max=True):
+    """Adds colour bar to existing axes.
+
+    :param axes_object: Existing axes (instance of
+        `matplotlib.axes._subplots.AxesSubplot`).
+    :param colour_map_object: Colour scheme (instance of
+        `matplotlib.pyplot.cm`).
+    :param values_to_colour: numpy array of values to colour.
+    :param min_colour_value: Minimum value in colour scheme.
+    :param max_colour_value: Max value in colour scheme.
+    :param colour_norm_object: Instance of `matplotlib.colors.BoundaryNorm`,
+        defining the scale of the colour map.  If `colour_norm_object is None`,
+        will assume that scale is linear.
+    :param orientation_string: Orientation of colour bar ("vertical" or
+        "horizontal").
+    :param extend_min: Boolean flag.  If True, the bottom of the colour bar will
+        have an arrow.  If False, it will be a flat line, suggesting that lower
+        values are not possible.
+    :param extend_max: Same but for top of colour bar.
+    :return: colour_bar_object: Colour bar (instance of
+        `matplotlib.pyplot.colorbar`) created by this method.
+    """
+
+    if colour_norm_object is None:
+        colour_norm_object = matplotlib.colors.Normalize(
+            vmin=min_colour_value, vmax=max_colour_value, clip=False
+        )
+
+    scalar_mappable_object = pyplot.cm.ScalarMappable(
+        cmap=colour_map_object, norm=colour_norm_object
+    )
+    scalar_mappable_object.set_array(values_to_colour)
+
+    if extend_min and extend_max:
+        extend_string = 'both'
+    elif extend_min:
+        extend_string = 'min'
+    elif extend_max:
+        extend_string = 'max'
+    else:
+        extend_string = 'neither'
+
+    if orientation_string == 'horizontal':
+        padding = 0.075
+    else:
+        padding = 0.05
+
+    colour_bar_object = pyplot.colorbar(
+        ax=axes_object, mappable=scalar_mappable_object,
+        orientation=orientation_string, pad=padding, extend=extend_string,
+        shrink=0.8
+    )
+
+    colour_bar_object.ax.tick_params(labelsize=FONT_SIZE)
+    return colour_bar_object
 
 
 def time_string_to_unix(time_string, time_format):
@@ -571,3 +632,93 @@ def plot_model_coefficients(model_object, predictor_names):
             horizontalalignment='center', verticalalignment='center',
             fontsize=BAR_GRAPH_FONT_SIZE
         )
+
+
+def plot_scores_2d(
+        score_matrix, min_colour_value, max_colour_value, x_tick_labels,
+        y_tick_labels, colour_map_object=pyplot.get_cmap('plasma')
+):
+    """Plots scores on 2-D grid.
+
+    M = number of rows in grid
+    N = number of columns in grid
+
+    :param score_matrix: M-by-N numpy array of scores.
+    :param min_colour_value: Minimum value in colour scheme.
+    :param max_colour_value: Max value in colour scheme.
+    :param x_tick_labels: length-N numpy array of tick values.
+    :param y_tick_labels: length-M numpy array of tick values.
+    :param colour_map_object: Colour scheme (instance of
+        `matplotlib.pyplot.cm`).
+    """
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+
+    pyplot.imshow(
+        score_matrix, cmap=colour_map_object, origin='lower',
+        vmin=min_colour_value, vmax=max_colour_value
+    )
+
+    x_tick_values = numpy.linspace(
+        0, score_matrix.shape[1] - 1, num=score_matrix.shape[1], dtype=float
+    )
+    y_tick_values = numpy.linspace(
+        0, score_matrix.shape[0] - 1, num=score_matrix.shape[0], dtype=float
+    )
+
+    pyplot.xticks(x_tick_values, x_tick_labels)
+    pyplot.yticks(y_tick_values, y_tick_labels)
+
+    _add_colour_bar(
+        axes_object=axes_object, colour_map_object=colour_map_object,
+        values_to_colour=score_matrix, min_colour_value=min_colour_value,
+        max_colour_value=max_colour_value
+    )
+
+
+def get_binarization_threshold(tabular_file_names, percentile_level):
+    """Computes binarization threshold for target variable.
+
+    Binarization threshold will be [q]th percentile of all target values, where
+    q = `percentile_level`.
+
+    :param tabular_file_names: 1-D list of paths to input files.
+    :param percentile_level: q in the above discussion.
+    :return: binarization_threshold: Binarization threshold (used to turn each
+        target value into a yes-or-no label).
+    """
+
+    max_target_values = numpy.array([])
+
+    for this_file_name in tabular_file_names:
+        print('Reading data from: "{0:s}"...'.format(this_file_name))
+        this_target_table = read_tabular_file(this_file_name)[-1]
+
+        max_target_values = numpy.concatenate((
+            max_target_values, this_target_table[TARGET_NAME].values
+        ))
+
+    binarization_threshold = numpy.percentile(
+        max_target_values, percentile_level)
+
+    print('\nBinarization threshold for "{0:s}" = {1:.4e}'.format(
+        TARGET_NAME, binarization_threshold
+    ))
+
+    return binarization_threshold
+
+
+def binarize_target_values(target_values, binarization_threshold):
+    """Binarizes target values.
+
+    E = number of examples (storm objects)
+
+    :param target_values: length-E numpy array of real-number target values.
+    :param binarization_threshold: Binarization threshold.
+    :return: target_values: length-E numpy array of binarized target values
+        (integers in 0...1).
+    """
+
+    return (target_values >= binarization_threshold).astype(int)
