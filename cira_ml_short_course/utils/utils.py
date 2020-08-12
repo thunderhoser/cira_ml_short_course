@@ -52,6 +52,9 @@ BRIER_SKILL_SCORE_KEY = 'brier_skill_score'
 FIGURE_WIDTH_INCHES = 10
 FIGURE_HEIGHT_INCHES = 10
 
+DEFAULT_GRAPH_LINE_COLOUR = numpy.array([27, 158, 119], dtype=float) / 255
+DEFAULT_GRAPH_LINE_WIDTH = 2
+
 BAR_GRAPH_COLOUR = numpy.array([27, 158, 119], dtype=float) / 255
 BAR_GRAPH_EDGE_WIDTH = 2
 BAR_GRAPH_FONT_SIZE = 14
@@ -660,8 +663,8 @@ def plot_scores_2d(
     :param score_matrix: M-by-N numpy array of scores.
     :param min_colour_value: Minimum value in colour scheme.
     :param max_colour_value: Max value in colour scheme.
-    :param x_tick_labels: length-N numpy array of tick values.
-    :param y_tick_labels: length-M numpy array of tick values.
+    :param x_tick_labels: length-N list of tick labels.
+    :param y_tick_labels: length-M list of tick labels.
     :param colour_map_object: Colour scheme (instance of
         `matplotlib.pyplot.cm`).
     """
@@ -690,6 +693,36 @@ def plot_scores_2d(
         values_to_colour=score_matrix, min_colour_value=min_colour_value,
         max_colour_value=max_colour_value
     )
+
+
+def plot_scores_1d(
+        score_values, x_tick_labels, line_colour=DEFAULT_GRAPH_LINE_COLOUR,
+        line_width=DEFAULT_GRAPH_LINE_WIDTH):
+    """Plots scores on a 1-D graph.
+
+    N = number of values
+
+    :param score_values: length-N numpy array of scores.
+    :param x_tick_labels: length-N list of tick labels.
+    :param line_colour: Line colour (ideally a length-3 numpy array).
+    :param line_width: Line width.
+    """
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+
+    num_values = len(score_values)
+    x_tick_values = numpy.linspace(
+        0, num_values - 1, num=num_values, dtype=float
+    )
+
+    pyplot.plot(
+        x_tick_values, score_values, color=line_colour, linestyle='solid',
+        linewidth=line_width
+    )
+
+    pyplot.xticks(x_tick_values, x_tick_labels)
 
 
 def get_binarization_threshold(tabular_file_names, percentile_level):
@@ -1039,7 +1072,7 @@ def setup_k_means(num_clusters=10, num_iterations=300):
 
     return KMeans(
         n_clusters=num_clusters, init='k-means++', max_iter=num_iterations,
-        random_state=RANDOM_SEED, verbose=2
+        n_init=1, random_state=RANDOM_SEED, verbose=2
     )
 
 
