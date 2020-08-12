@@ -1185,7 +1185,7 @@ def use_ahc_for_classifn(
 
     new_predictor_matrix = new_predictor_table.to_numpy()
     distance_matrix = cdist(
-        new_predictor_matrix, training_predictor_matrix, metric='sqeuclidean'
+        new_predictor_matrix, cluster_centroid_matrix, metric='sqeuclidean'
     )
     cluster_index_by_new_example = numpy.argmin(distance_matrix, axis=1)
     print(cluster_index_by_new_example)
