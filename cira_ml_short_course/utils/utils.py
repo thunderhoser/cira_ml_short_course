@@ -813,7 +813,9 @@ def eval_binary_classifn(
         `create_plots == True or verbose == True`.
     """
 
-    dataset_name = dataset_name[0].upper() + dataset_name[1:]
+    if verbose or create_plots:
+        assert dataset_name is not None
+        dataset_name = dataset_name[0].upper() + dataset_name[1:]
 
     # Plot ROC curve.
     pofd_by_threshold, pod_by_threshold = roc_curves.plot_roc_curve(
@@ -887,13 +889,13 @@ def eval_binary_classifn(
     }
 
     if verbose:
-        print('{0:s} Max Peirce score (POD - POFD) = {1:.3f}'.format(
+        print('{0:s} max Peirce score (POD - POFD) = {1:.3f}'.format(
             dataset_name, evaluation_dict[MAX_PEIRCE_SCORE_KEY]
         ))
         print('{0:s} AUC (area under ROC curve) = {1:.3f}'.format(
             dataset_name, evaluation_dict[AUC_KEY]
         ))
-        print('{0:s} Max CSI (critical success index) = {1:.3f}'.format(
+        print('{0:s} max CSI (critical success index) = {1:.3f}'.format(
             dataset_name, evaluation_dict[MAX_CSI_KEY]
         ))
         print('{0:s} Brier score = {1:.3f}'.format(
