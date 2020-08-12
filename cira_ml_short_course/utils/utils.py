@@ -1188,5 +1188,6 @@ def use_ahc_for_classifn(
         new_predictor_matrix, training_predictor_matrix, metric='sqeuclidean'
     )
     cluster_index_by_new_example = numpy.argmin(distance_matrix, axis=1)
+    print(cluster_index_by_new_example)
 
     return cluster_to_training_event_freq[cluster_index_by_new_example]
