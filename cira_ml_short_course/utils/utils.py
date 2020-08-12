@@ -8,12 +8,13 @@ import numpy
 import pandas
 import matplotlib.colors
 from matplotlib import pyplot
+from scipy.spatial.distance import cdist
 from sklearn.metrics import auc as sklearn_auc
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, \
     SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, AgglomerativeClustering
 from cira_ml_short_course.utils import roc_curves
 from cira_ml_short_course.utils import performance_diagrams as perf_diagrams
 from cira_ml_short_course.utils import attributes_diagrams as attr_diagrams
@@ -717,12 +718,12 @@ def plot_scores_1d(
         0, num_values - 1, num=num_values, dtype=float
     )
 
-    pyplot.plot(
+    axes_object.plot(
         x_tick_values, score_values, color=line_colour, linestyle='solid',
         linewidth=line_width
     )
 
-    pyplot.xticks(x_tick_values, x_tick_labels)
+    axes_object.set_xticks(x_tick_values, x_tick_labels)
 
 
 def get_binarization_threshold(tabular_file_names, percentile_level):
@@ -1062,7 +1063,7 @@ def train_classification_gbt(model_object, training_predictor_table,
 
 
 def setup_k_means(num_clusters=10, num_iterations=300):
-    """Sets up (but does not train) K-means model for clustering.
+    """Sets up (but does not train) K-means model.
 
     :param num_clusters: Number of clusters.
     :param num_iterations: Number of iterations (number of times that clusters
@@ -1076,10 +1077,11 @@ def setup_k_means(num_clusters=10, num_iterations=300):
     )
 
 
-def train_k_means(model_object, training_predictor_table):
-    """Trains K-means model for clustering.
+def train_clustering_model(model_object, training_predictor_table):
+    """Trains any clustering model.
 
-    :param model_object: Untrained model created by `setup_k_means`.
+    :param model_object: Untrained model created by `setup_k_means`,
+        `setup_ahc`, or the like.
     :param training_predictor_table: See doc for `read_tabular_file`.
     :return: model_object: Trained version of input.
     """
@@ -1098,8 +1100,8 @@ def use_k_means_for_classifn(
     :param model_object: Trained instance of `sklearn.cluster.KMeans`.
     :param training_target_table: See doc for `read_tabular_file`.
     :param new_predictor_table: Same.
-    :return: new_predicted_target_values: length-E numpy array of predicted
-        target values, where E = number of new examples (number of rows in
+    :return: new_predicted_probs: length-E numpy array of predicted event
+        probabilities, where E = number of new examples (number of rows in
         `new_predictor_table`).
     """
 
@@ -1124,5 +1126,67 @@ def use_k_means_for_classifn(
     cluster_index_by_new_example = model_object.predict(
         new_predictor_table.to_numpy()
     )
+
+    return cluster_to_training_event_freq[cluster_index_by_new_example]
+
+
+def setup_ahc(num_clusters=10):
+    """Sets up (but does not train) AHC (agglomerative hierarchical clustering).
+
+    :param num_clusters: Number of clusters.
+    :return: model_object: Instance of
+        `sklearn.cluster.AgglomerativeClustering`.
+    """
+
+    return AgglomerativeClustering(
+        n_clusters=num_clusters, affinity='euclidean', linkage='ward',
+        distance_threshold=None
+    )
+
+
+def use_ahc_for_classifn(
+        model_object, training_predictor_table, training_target_table,
+        new_predictor_table):
+    """Uses trained AHC model to classify new examples.
+
+    :param model_object: Trained instance of
+        `sklearn.cluster.AgglomerativeClustering`.
+    :param training_predictor_table: See doc for `read_tabular_file`.
+    :param training_target_table: Same.
+    :param new_predictor_table: Same.
+    :return: new_predicted_target_values: See doc for
+        `use_k_means_for_classifn`.
+    """
+
+    train_example_to_cluster = model_object.labels_
+    training_predictor_matrix = training_predictor_table.to_numpy()
+    training_classes = training_target_table[BINARIZED_TARGET_NAME].values
+
+    num_clusters = model_object.n_clusters_
+    num_predictors = training_predictor_matrix.shape[1]
+    cluster_to_training_event_freq = numpy.full(num_clusters, numpy.nan)
+    cluster_centroid_matrix = numpy.full(
+        (num_clusters, num_predictors), numpy.nan
+    )
+
+    for j in range(num_clusters):
+        these_indices = numpy.where(train_example_to_cluster == j)[0]
+
+        if len(these_indices) == 0:
+            cluster_centroid_matrix[j, :] = numpy.inf
+            continue
+
+        cluster_to_training_event_freq[j] = numpy.mean(
+            training_classes[these_indices]
+        )
+        cluster_centroid_matrix[j, :] = numpy.mean(
+            training_predictor_matrix[these_indices], axis=0
+        )
+
+    new_predictor_matrix = new_predictor_table.to_numpy()
+    distance_matrix = cdist(
+        new_predictor_matrix, training_predictor_matrix, metric='sqeuclidean'
+    )
+    cluster_index_by_new_example = numpy.argmin(distance_matrix, axis=1)
 
     return cluster_to_training_event_freq[cluster_index_by_new_example]
