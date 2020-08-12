@@ -11,6 +11,8 @@ from matplotlib import pyplot
 from sklearn.metrics import auc as sklearn_auc
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, \
     SGDClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from cira_ml_short_course.utils import roc_curves
 from cira_ml_short_course.utils import performance_diagrams as perf_diagrams
 from cira_ml_short_course.utils import attributes_diagrams as attr_diagrams
@@ -811,7 +813,7 @@ def eval_binary_classifn(
         `create_plots == True or verbose == True`.
     """
 
-    dataset_name[0].upper() + dataset_name[1:]
+    dataset_name = dataset_name[0].upper() + dataset_name[1:]
 
     # Plot ROC curve.
     pofd_by_threshold, pod_by_threshold = roc_curves.plot_roc_curve(
@@ -904,3 +906,120 @@ def eval_binary_classifn(
         print(message_string)
 
     return evaluation_dict
+
+
+def setup_classification_tree(
+        min_examples_at_split=30, min_examples_at_leaf=30):
+    """Sets up (but does not train) decision tree for classification.
+
+    :param min_examples_at_split: Minimum number of examples at split node.
+    :param min_examples_at_leaf: Minimum number of examples at leaf node.
+    :return: model_object: Instance of `sklearn.tree.DecisionTreeClassifier`.
+    """
+
+    return DecisionTreeClassifier(
+        criterion='entropy', min_samples_split=min_examples_at_split,
+        min_samples_leaf=min_examples_at_leaf, random_state=RANDOM_SEED
+    )
+
+
+def train_classification_tree(model_object, training_predictor_table,
+                              training_target_table):
+    """Trains decision tree for classification.
+
+    :param model_object: Untrained model created by `setup_classification_tree`.
+    :param training_predictor_table: See doc for `read_tabular_file`.
+    :param training_target_table: Same.
+    :return: model_object: Trained version of input.
+    """
+
+    model_object.fit(
+        X=training_predictor_table.to_numpy(),
+        y=training_target_table[BINARIZED_TARGET_NAME].values
+    )
+
+    return model_object
+
+
+def setup_classification_forest(
+        max_predictors_per_split, num_trees=100, min_examples_at_split=30,
+        min_examples_at_leaf=30):
+    """Sets up (but does not train) random forest for classification.
+
+    :param max_predictors_per_split: Max number of predictors to try at each
+        split.
+    :param num_trees: Number of trees.
+    :param min_examples_at_split: Minimum number of examples at split node.
+    :param min_examples_at_leaf: Minimum number of examples at leaf node.
+    :return: model_object: Instance of
+        `sklearn.ensemble.RandomForestClassifier`.
+    """
+
+    return RandomForestClassifier(
+        n_estimators=num_trees, min_samples_split=min_examples_at_split,
+        min_samples_leaf=min_examples_at_leaf,
+        max_features=max_predictors_per_split, bootstrap=True,
+        random_state=RANDOM_SEED, verbose=2
+    )
+
+
+def train_classification_forest(model_object, training_predictor_table,
+                                training_target_table):
+    """Trains random forest for classification.
+
+    :param model_object: Untrained model created by
+        `setup_classification_forest`.
+    :param training_predictor_table: See doc for `read_tabular_file`.
+    :param training_target_table: Same.
+    :return: model_object: Trained version of input.
+    """
+
+    model_object.fit(
+        X=training_predictor_table.to_numpy(),
+        y=training_target_table[BINARIZED_TARGET_NAME].values
+    )
+
+    return model_object
+
+
+def setup_classification_gbt(
+        max_predictors_per_split, num_trees=100, learning_rate=0.1,
+        min_examples_at_split=30, min_examples_at_leaf=30):
+    """Sets up (but does not train) gradient-boosted trees for classification.
+
+    :param max_predictors_per_split: Max number of predictors to try at each
+        split.
+    :param num_trees: Number of trees.
+    :param learning_rate: Learning rate.
+    :param min_examples_at_split: Minimum number of examples at split node.
+    :param min_examples_at_leaf: Minimum number of examples at leaf node.
+    :return: model_object: Instance of
+        `sklearn.ensemble.GradientBoostingClassifier`.
+    """
+
+    return GradientBoostingClassifier(
+        loss='exponential', learning_rate=learning_rate, n_estimators=num_trees,
+        min_samples_split=min_examples_at_split,
+        min_samples_leaf=min_examples_at_leaf,
+        max_features=max_predictors_per_split,
+        random_state=RANDOM_SEED, verbose=2
+    )
+
+
+def train_classification_gbt(model_object, training_predictor_table,
+                             training_target_table):
+    """Trains gradient-boosted trees for classification.
+
+    :param model_object: Untrained model created by
+        `setup_classification_gbt`.
+    :param training_predictor_table: See doc for `read_feature_file`.
+    :param training_target_table: Same.
+    :return: model_object: Trained version of input.
+    """
+
+    model_object.fit(
+        X=training_predictor_table.to_numpy(),
+        y=training_target_table[BINARIZED_TARGET_NAME].values
+    )
+
+    return model_object
