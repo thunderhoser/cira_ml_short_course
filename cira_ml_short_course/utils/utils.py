@@ -13,6 +13,7 @@ from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, \
     SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.cluster import KMeans
 from cira_ml_short_course.utils import roc_curves
 from cira_ml_short_course.utils import performance_diagrams as perf_diagrams
 from cira_ml_short_course.utils import attributes_diagrams as attr_diagrams
@@ -1014,7 +1015,7 @@ def train_classification_gbt(model_object, training_predictor_table,
 
     :param model_object: Untrained model created by
         `setup_classification_gbt`.
-    :param training_predictor_table: See doc for `read_feature_file`.
+    :param training_predictor_table: See doc for `read_tabular_file`.
     :param training_target_table: Same.
     :return: model_object: Trained version of input.
     """
@@ -1025,3 +1026,70 @@ def train_classification_gbt(model_object, training_predictor_table,
     )
 
     return model_object
+
+
+def setup_k_means(num_clusters=10, num_iterations=300):
+    """Sets up (but does not train) K-means model for clustering.
+
+    :param num_clusters: Number of clusters.
+    :param num_iterations: Number of iterations (number of times that clusters
+        are updated).
+    :return: model_object: Instance of `sklearn.cluster.KMeans`.
+    """
+
+    return KMeans(
+        n_clusters=num_clusters, init='k-means++', max_iter=num_iterations,
+        random_state=RANDOM_SEED, verbose=2
+    )
+
+
+def train_k_means(model_object, training_predictor_table):
+    """Trains K-means model for clustering.
+
+    :param model_object: Untrained model created by `setup_k_means`.
+    :param training_predictor_table: See doc for `read_tabular_file`.
+    :return: model_object: Trained version of input.
+    """
+
+    model_object.fit(
+        X=training_predictor_table.to_numpy()
+    )
+
+    return model_object
+
+
+def use_k_means_for_classifn(
+        model_object, training_target_table, new_predictor_table):
+    """Uses trained K-means model to classify new examples.
+
+    :param model_object: Trained instance of `sklearn.cluster.KMeans`.
+    :param training_target_table: See doc for `read_tabular_file`.
+    :param new_predictor_table: Same.
+    :return: new_predicted_target_values: length-E numpy array of predicted
+        target values, where E = number of new examples (number of rows in
+        `new_predictor_table`).
+    """
+
+    training_classes = training_target_table[BINARIZED_TARGET_NAME].values
+
+    train_example_to_cluster = model_object.labels_
+    num_clusters = model_object.cluster_centers_.shape[0]
+    cluster_to_training_event_freq = numpy.full(num_clusters, numpy.nan)
+
+    for j in range(num_clusters):
+        these_indices = numpy.where(train_example_to_cluster == j)[0]
+
+        # If no training examples in cluster, assume climatology.
+        if len(these_indices) == 0:
+            cluster_to_training_event_freq[j] = numpy.mean(training_classes)
+            continue
+
+        cluster_to_training_event_freq[j] = numpy.mean(
+            training_classes[these_indices]
+        )
+
+    cluster_index_by_new_example = model_object.predict(
+        new_predictor_table.to_numpy()
+    )
+
+    return cluster_to_training_event_freq[cluster_index_by_new_example]
