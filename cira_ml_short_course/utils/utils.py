@@ -723,7 +723,9 @@ def plot_scores_1d(
         linewidth=line_width
     )
 
-    axes_object.set_xticks(x_tick_values, x_tick_labels)
+    print(x_tick_values)
+    print(x_tick_labels)
+    pyplot.xticks(x_tick_values, x_tick_labels)
 
 
 def get_binarization_threshold(tabular_file_names, percentile_level):
@@ -1188,6 +1190,5 @@ def use_ahc_for_classifn(
         new_predictor_matrix, cluster_centroid_matrix, metric='sqeuclidean'
     )
     cluster_index_by_new_example = numpy.argmin(distance_matrix, axis=1)
-    print(cluster_index_by_new_example)
 
     return cluster_to_training_event_freq[cluster_index_by_new_example]
