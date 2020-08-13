@@ -9,10 +9,11 @@ import pandas
 import matplotlib.colors
 from matplotlib import pyplot
 from scipy.spatial.distance import cdist
+from scipy.cluster.hierarchy import linkage, dendrogram
 from sklearn.metrics import auc as sklearn_auc
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, \
     SGDClassifier
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.cluster import KMeans, AgglomerativeClustering
 from cira_ml_short_course.utils import roc_curves
@@ -52,6 +53,8 @@ BRIER_SKILL_SCORE_KEY = 'brier_skill_score'
 # Plotting constants.
 FIGURE_WIDTH_INCHES = 10
 FIGURE_HEIGHT_INCHES = 10
+LARGE_FIGURE_WIDTH_INCHES = 15
+LARGE_FIGURE_HEIGHT_INCHES = 15
 
 DEFAULT_GRAPH_LINE_COLOUR = numpy.array([27, 158, 119], dtype=float) / 255
 DEFAULT_GRAPH_LINE_WIDTH = 2
@@ -723,8 +726,6 @@ def plot_scores_1d(
         linewidth=line_width
     )
 
-    print(x_tick_values)
-    print(x_tick_labels)
     pyplot.xticks(x_tick_values, x_tick_labels)
 
 
@@ -980,6 +981,27 @@ def train_classification_tree(model_object, training_predictor_table,
     return model_object
 
 
+def plot_decision_tree(model_object, predictor_names, num_levels_to_show,
+                       font_size=13):
+    """Plots single decision tree.
+
+    :param model_object: Trained model created by `setup_classification_tree`.
+    :param predictor_names: 1-D list of predictor names.
+    :param num_levels_to_show: Number of levels to show in tree.
+    :param font_size: Font size.
+    """
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(LARGE_FIGURE_WIDTH_INCHES, LARGE_FIGURE_HEIGHT_INCHES)
+    )
+
+    _ = plot_tree(
+        model_object, max_depth=num_levels_to_show - 1,
+        feature_names=predictor_names, label='none', impurity=False,
+        rounded=True, precision=2, ax=axes_object, fontsize=font_size
+    )
+
+
 def setup_classification_forest(
         max_predictors_per_split, num_trees=100, min_examples_at_split=30,
         min_examples_at_leaf=30):
@@ -1192,3 +1214,25 @@ def use_ahc_for_classifn(
     cluster_index_by_new_example = numpy.argmin(distance_matrix, axis=1)
 
     return cluster_to_training_event_freq[cluster_index_by_new_example]
+
+
+def plot_ahc_dendrogram(training_predictor_table, num_levels_to_show):
+    """Plots dendrogram to illustrate agglom hierarchical clustering (AHC).
+
+    :param training_predictor_table: See doc for `read_tabular_file`.
+    :param num_levels_to_show: Number of levels to show in dendrogram.
+    """
+
+    linkage_matrix = linkage(training_predictor_table.to_numpy(), method='ward')
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(LARGE_FIGURE_WIDTH_INCHES, LARGE_FIGURE_HEIGHT_INCHES)
+    )
+
+    dendrogram(
+        linkage_matrix, truncate_mode='level', p=num_levels_to_show,
+        no_labels=True, ax=axes_object
+    )
+
+    axes_object.set_yticks([], [])
+    pyplot.show()
