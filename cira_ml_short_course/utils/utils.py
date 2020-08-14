@@ -16,9 +16,6 @@ from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, \
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.cluster import KMeans, AgglomerativeClustering
-from cira_ml_short_course.utils import roc_curves
-from cira_ml_short_course.utils import performance_diagrams as perf_diagrams
-from cira_ml_short_course.utils import attributes_diagrams as attr_diagrams
 from cira_ml_short_course.plotting import evaluation_plotting
 
 # TODO(thunderhoser): Split this into different modules.
@@ -228,6 +225,148 @@ def _add_colour_bar(
 
     colour_bar_object.ax.tick_params(labelsize=FONT_SIZE)
     return colour_bar_object
+
+
+def _get_points_in_roc_curve(observed_labels, forecast_probabilities):
+    """Creates points for ROC curve.
+
+    E = number of examples
+    T = number of binarization thresholds
+
+    :param observed_labels: length-E numpy array of class labels (integers in
+        0...1).
+    :param forecast_probabilities: length-E numpy array with forecast
+        probabilities of label = 1.
+    :return: pofd_by_threshold: length-T numpy array of POFD (probability of
+        false detection) values.
+    :return: pod_by_threshold: length-T numpy array of POD (probability of
+        detection) values.
+    """
+
+    assert numpy.all(numpy.logical_or(
+        observed_labels == 0, observed_labels == 1
+    ))
+
+    assert numpy.all(numpy.logical_and(
+        forecast_probabilities >= 0, forecast_probabilities <= 1
+    ))
+
+    observed_labels = observed_labels.astype(int)
+    binarization_thresholds = numpy.linspace(0, 1, num=1001, dtype=float)
+
+    num_thresholds = len(binarization_thresholds)
+    pofd_by_threshold = numpy.full(num_thresholds, numpy.nan)
+    pod_by_threshold = numpy.full(num_thresholds, numpy.nan)
+
+    for k in range(num_thresholds):
+        these_forecast_labels = (
+            forecast_probabilities >= binarization_thresholds[k]
+        ).astype(int)
+
+        this_num_hits = numpy.sum(numpy.logical_and(
+            these_forecast_labels == 1, observed_labels == 1
+        ))
+
+        this_num_false_alarms = numpy.sum(numpy.logical_and(
+            these_forecast_labels == 1, observed_labels == 0
+        ))
+
+        this_num_misses = numpy.sum(numpy.logical_and(
+            these_forecast_labels == 0, observed_labels == 1
+        ))
+
+        this_num_correct_nulls = numpy.sum(numpy.logical_and(
+            these_forecast_labels == 0, observed_labels == 0
+        ))
+
+        try:
+            pofd_by_threshold[k] = (
+                float(this_num_false_alarms) /
+                (this_num_false_alarms + this_num_correct_nulls)
+            )
+        except ZeroDivisionError:
+            pass
+
+        try:
+            pod_by_threshold[k] = (
+                float(this_num_hits) / (this_num_hits + this_num_misses)
+            )
+        except ZeroDivisionError:
+            pass
+
+    pod_by_threshold = numpy.array([1.] + pod_by_threshold.tolist() + [0.])
+    pofd_by_threshold = numpy.array([1.] + pofd_by_threshold.tolist() + [0.])
+
+    return pofd_by_threshold, pod_by_threshold
+
+
+def _get_points_in_perf_diagram(observed_labels, forecast_probabilities):
+    """Creates points for performance diagram.
+
+    E = number of examples
+    T = number of binarization thresholds
+
+    :param observed_labels: length-E numpy array of class labels (integers in
+        0...1).
+    :param forecast_probabilities: length-E numpy array with forecast
+        probabilities of label = 1.
+    :return: pod_by_threshold: length-T numpy array of POD (probability of
+        detection) values.
+    :return: success_ratio_by_threshold: length-T numpy array of success ratios.
+    """
+
+    assert numpy.all(numpy.logical_or(
+        observed_labels == 0, observed_labels == 1
+    ))
+
+    assert numpy.all(numpy.logical_and(
+        forecast_probabilities >= 0, forecast_probabilities <= 1
+    ))
+
+    observed_labels = observed_labels.astype(int)
+    binarization_thresholds = numpy.linspace(0, 1, num=1001, dtype=float)
+
+    num_thresholds = len(binarization_thresholds)
+    pod_by_threshold = numpy.full(num_thresholds, numpy.nan)
+    success_ratio_by_threshold = numpy.full(num_thresholds, numpy.nan)
+
+    for k in range(num_thresholds):
+        these_forecast_labels = (
+            forecast_probabilities >= binarization_thresholds[k]
+        ).astype(int)
+
+        this_num_hits = numpy.sum(numpy.logical_and(
+            these_forecast_labels == 1, observed_labels == 1
+        ))
+
+        this_num_false_alarms = numpy.sum(numpy.logical_and(
+            these_forecast_labels == 1, observed_labels == 0
+        ))
+
+        this_num_misses = numpy.sum(numpy.logical_and(
+            these_forecast_labels == 0, observed_labels == 1
+        ))
+
+        try:
+            pod_by_threshold[k] = (
+                float(this_num_hits) / (this_num_hits + this_num_misses)
+            )
+        except ZeroDivisionError:
+            pass
+
+        try:
+            success_ratio_by_threshold[k] = (
+                float(this_num_hits) / (this_num_hits + this_num_false_alarms)
+            )
+        except ZeroDivisionError:
+            pass
+
+    pod_by_threshold = numpy.array([1.] + pod_by_threshold.tolist() + [0.])
+    success_ratio_by_threshold = numpy.array(
+        [0.] + success_ratio_by_threshold.tolist() + [1.]
+    )
+
+    return pod_by_threshold, success_ratio_by_threshold
 
 
 def time_string_to_unix(time_string, time_format):
@@ -856,44 +995,59 @@ def eval_binary_classifn(
         dataset_name = dataset_name[0].upper() + dataset_name[1:]
 
     # Plot ROC curve.
-    pofd_by_threshold, pod_by_threshold = roc_curves.plot_roc_curve(
+    pofd_by_threshold, pod_by_threshold = _get_points_in_roc_curve(
         observed_labels=observed_labels,
         forecast_probabilities=forecast_probabilities
     )
-
     max_peirce_score = numpy.nanmax(pod_by_threshold - pofd_by_threshold)
     area_under_roc_curve = sklearn_auc(x=pofd_by_threshold, y=pod_by_threshold)
 
     if create_plots:
+        _, axes_object = pyplot.subplots(
+            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+        )
+
+        evaluation_plotting.plot_roc_curve(
+            axes_object=axes_object, pod_by_threshold=pod_by_threshold,
+            pofd_by_threshold=pofd_by_threshold
+        )
+
         title_string = '{0:s} ROC curve (AUC = {1:.3f})'.format(
             dataset_name, area_under_roc_curve
         )
-        pyplot.title(title_string)
+        axes_object.set_title(title_string)
         pyplot.show()
 
-    pod_by_threshold, success_ratio_by_threshold = (
-        perf_diagrams.plot_performance_diagram(
-            observed_labels=observed_labels,
-            forecast_probabilities=forecast_probabilities
-        )
+    pod_by_threshold, success_ratio_by_threshold = _get_points_in_perf_diagram(
+        observed_labels=observed_labels,
+        forecast_probabilities=forecast_probabilities
     )
-
     csi_by_threshold = (
         (pod_by_threshold ** -1 + success_ratio_by_threshold ** -1 - 1) ** -1
     )
     max_csi = numpy.nanmax(csi_by_threshold)
 
     if create_plots:
+        _, axes_object = pyplot.subplots(
+            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+        )
+
+        evaluation_plotting.plot_performance_diagram(
+            axes_object=axes_object, pod_by_threshold=pod_by_threshold,
+            success_ratio_by_threshold=success_ratio_by_threshold
+        )
+
         title_string = '{0:s} performance diagram (max CSI = {1:.3f})'.format(
             dataset_name, max_csi
         )
-        pyplot.title(title_string)
+        axes_object.set_title(title_string)
         pyplot.show()
 
-    mean_forecast_probs, event_frequencies, example_counts, axes_handle = (
-        attr_diagrams.plot_attributes_diagram(
-            observed_labels=observed_labels,
-            forecast_probabilities=forecast_probabilities, num_bins=20
+    mean_forecast_probs, event_frequencies, example_counts = (
+        _get_reliability_curve(
+            actual_values=observed_labels.astype(float),
+            predicted_values=forecast_probabilities,
+            num_bins=20, max_bin_edge=1., invert=False
         )
     )
 
@@ -912,10 +1066,26 @@ def eval_binary_classifn(
     brier_skill_score = (resolution - reliability) / uncertainty
 
     if create_plots:
-        title_string = (
-            '{0:s} attributes diagram (Brier skill score = {1:.3f})'
-        ).format(dataset_name, brier_skill_score)
-        axes_handle.set_title(title_string)
+        figure_object, axes_object = pyplot.subplots(
+            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+        )
+
+        evaluation_plotting.plot_attributes_diagram(
+            figure_object=figure_object, axes_object=axes_object,
+            mean_predictions=mean_forecast_probs,
+            mean_observations=event_frequencies,
+            example_counts=example_counts,
+            mean_value_in_training=training_event_frequency,
+            min_value_to_plot=0., max_value_to_plot=1.
+        )
+
+        axes_object.set_xlabel(r'Forecast probability')
+        axes_object.set_ylabel(r'Conditional event frequency')
+
+        title_string = '{0:s} attributes diagram (BSS = {1:.3f})'.format(
+            dataset_name, brier_skill_score
+        )
+        axes_object.set_title(title_string)
         pyplot.show()
 
     evaluation_dict = {

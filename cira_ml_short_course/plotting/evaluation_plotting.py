@@ -6,8 +6,20 @@ from descartes import PolygonPatch
 import matplotlib.colors
 from matplotlib import pyplot
 
+CSI_LEVELS = numpy.linspace(0, 1, num=11, dtype=float)
+PEIRCE_SCORE_LEVELS = numpy.linspace(0, 1, num=11, dtype=float)
+
+ROC_CURVE_COLOUR = numpy.array([228, 26, 28], dtype=float) / 255
+PERF_DIAGRAM_COLOUR = numpy.array([228, 26, 28], dtype=float) / 255
+
+FREQ_BIAS_COLOUR = numpy.full(3, 152. / 255)
+FREQ_BIAS_WIDTH = 2.
+FREQ_BIAS_STRING_FORMAT = '%.2f'
+FREQ_BIAS_PADDING = 10
+FREQ_BIAS_LEVELS = numpy.array([0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5])
+
 RELIABILITY_LINE_COLOUR = numpy.array([228, 26, 28], dtype=float) / 255
-RELIABILITY_LINE_WIDTH = 3.
+DEFAULT_LINE_WIDTH = 3.
 
 REFERENCE_LINE_COLOUR = numpy.full(3, 152. / 255)
 REFERENCE_LINE_WIDTH = 2.
@@ -37,7 +49,7 @@ pyplot.rc('figure', titlesize=FONT_SIZE)
 def _plot_reliability_curve(
         axes_object, mean_predictions, mean_observations, min_value_to_plot,
         max_value_to_plot, line_colour=RELIABILITY_LINE_COLOUR,
-        line_style='solid', line_width=RELIABILITY_LINE_WIDTH):
+        line_style='solid', line_width=DEFAULT_LINE_WIDTH):
     """Plots reliability curve.
 
     B = number of bins
@@ -293,11 +305,227 @@ def _plot_inset_histogram(
     )
 
 
+def _get_pofd_pod_grid(pofd_spacing=0.01, pod_spacing=0.01):
+    """Creates grid in POFD-POD space.
+
+    POFD = probability of false detection
+    POD = probability of detection
+
+    M = number of rows (unique POD values) in grid
+    N = number of columns (unique POFD values) in grid
+
+    :param pofd_spacing: Spacing between grid cells in adjacent columns.
+    :param pod_spacing: Spacing between grid cells in adjacent rows.
+    :return: pofd_matrix: M-by-N numpy array of POFD values.
+    :return: pod_matrix: M-by-N numpy array of POD values.
+    """
+
+    num_pofd_values = int(numpy.ceil(1. / pofd_spacing))
+    num_pod_values = int(numpy.ceil(1. / pod_spacing))
+
+    unique_pofd_values = numpy.linspace(
+        0, 1, num=num_pofd_values + 1, dtype=float
+    )
+    unique_pofd_values = unique_pofd_values[:-1] + pofd_spacing / 2
+
+    unique_pod_values = numpy.linspace(
+        0, 1, num=num_pod_values + 1, dtype=float
+    )
+    unique_pod_values = unique_pod_values[:-1] + pod_spacing / 2
+
+    return numpy.meshgrid(unique_pofd_values, unique_pod_values[::-1])
+
+
+def _get_peirce_colour_scheme():
+    """Returns colour scheme for Peirce score.
+
+    :return: colour_map_object: Colour scheme (instance of
+        `matplotlib.colors.ListedColormap`).
+    :return: colour_norm_object: Instance of `matplotlib.colors.BoundaryNorm`,
+        defining the scale of the colour map.
+    """
+
+    this_colour_map_object = pyplot.get_cmap('Blues')
+    this_colour_norm_object = matplotlib.colors.BoundaryNorm(
+        PEIRCE_SCORE_LEVELS, this_colour_map_object.N
+    )
+
+    rgba_matrix = this_colour_map_object(this_colour_norm_object(
+        PEIRCE_SCORE_LEVELS
+    ))
+    colour_list = [
+        rgba_matrix[i, ..., :-1] for i in range(rgba_matrix.shape[0])
+    ]
+
+    colour_map_object = matplotlib.colors.ListedColormap(colour_list)
+    colour_map_object.set_under(numpy.full(3, 1.))
+    colour_norm_object = matplotlib.colors.BoundaryNorm(
+        PEIRCE_SCORE_LEVELS, colour_map_object.N
+    )
+
+    return colour_map_object, colour_norm_object
+
+
+def _get_sr_pod_grid(success_ratio_spacing=0.01, pod_spacing=0.01):
+    """Creates grid in SR-POD space
+
+    SR = success ratio
+    POD = probability of detection
+
+    M = number of rows (unique POD values) in grid
+    N = number of columns (unique success ratios) in grid
+
+    :param success_ratio_spacing: Spacing between adjacent success ratios
+        (x-values) in grid.
+    :param pod_spacing: Spacing between adjacent POD values (y-values) in grid.
+    :return: success_ratio_matrix: M-by-N numpy array of success ratios.
+        Success ratio increases while traveling right along a row.
+    :return: pod_matrix: M-by-N numpy array of POD values.  POD increases while
+        traveling up a column.
+    """
+
+    num_success_ratios = int(numpy.ceil(1. / success_ratio_spacing))
+    num_pod_values = int(numpy.ceil(1. / pod_spacing))
+
+    unique_success_ratios = numpy.linspace(
+        0, 1, num=num_success_ratios + 1, dtype=float
+    )
+    unique_success_ratios = (
+        unique_success_ratios[:-1] + success_ratio_spacing / 2
+    )
+
+    unique_pod_values = numpy.linspace(
+        0, 1, num=num_pod_values + 1, dtype=float
+    )
+    unique_pod_values = unique_pod_values[:-1] + pod_spacing / 2
+
+    return numpy.meshgrid(unique_success_ratios, unique_pod_values[::-1])
+
+
+def _csi_from_sr_and_pod(success_ratio_array, pod_array):
+    """Computes CSI (critical success index) from success ratio and POD.
+
+    POD = probability of detection
+
+    :param success_ratio_array: numpy array (any shape) of success ratios.
+    :param pod_array: numpy array (same shape) of POD values.
+    :return: csi_array: numpy array (same shape) of CSI values.
+    """
+
+    return (success_ratio_array ** -1 + pod_array ** -1 - 1.) ** -1
+
+
+def _bias_from_sr_and_pod(success_ratio_array, pod_array):
+    """Computes frequency bias from success ratio and POD.
+
+    POD = probability of detection
+
+    :param success_ratio_array: numpy array (any shape) of success ratios.
+    :param pod_array: numpy array (same shape) of POD values.
+    :return: frequency_bias_array: numpy array (same shape) of frequency biases.
+    """
+
+    return pod_array / success_ratio_array
+
+
+def _get_csi_colour_scheme():
+    """Returns colour scheme for CSI (critical success index).
+
+    :return: colour_map_object: Colour scheme (instance of
+        `matplotlib.colors.ListedColormap`).
+    :return: colour_norm_object: Instance of `matplotlib.colors.BoundaryNorm`,
+        defining the scale of the colour map.
+    """
+
+    this_colour_map_object = pyplot.get_cmap('Blues')
+    this_colour_norm_object = matplotlib.colors.BoundaryNorm(
+        CSI_LEVELS, this_colour_map_object.N
+    )
+
+    rgba_matrix = this_colour_map_object(this_colour_norm_object(
+        CSI_LEVELS
+    ))
+    colour_list = [
+        rgba_matrix[i, ..., :-1] for i in range(rgba_matrix.shape[0])
+    ]
+
+    colour_map_object = matplotlib.colors.ListedColormap(colour_list)
+    colour_map_object.set_under(numpy.full(3, 1.))
+    colour_norm_object = matplotlib.colors.BoundaryNorm(
+        CSI_LEVELS, colour_map_object.N
+    )
+
+    return colour_map_object, colour_norm_object
+
+
+def _add_colour_bar(
+        axes_object, colour_map_object, values_to_colour, min_colour_value=None,
+        max_colour_value=None, colour_norm_object=None,
+        orientation_string='vertical', extend_min=True, extend_max=True):
+    """Adds colour bar to existing axes.
+
+    :param axes_object: Existing axes (instance of
+        `matplotlib.axes._subplots.AxesSubplot`).
+    :param colour_map_object: Colour scheme (instance of
+        `matplotlib.pyplot.cm`).
+    :param values_to_colour: numpy array of values to colour.
+    :param min_colour_value: Minimum value in colour scheme.
+    :param max_colour_value: Max value in colour scheme.
+    :param colour_norm_object: Instance of `matplotlib.colors.BoundaryNorm`,
+        defining the scale of the colour map.  If `colour_norm_object is None`,
+        will assume that scale is linear.
+    :param orientation_string: Orientation of colour bar ("vertical" or
+        "horizontal").
+    :param extend_min: Boolean flag.  If True, the bottom of the colour bar will
+        have an arrow.  If False, it will be a flat line, suggesting that lower
+        values are not possible.
+    :param extend_max: Same but for top of colour bar.
+    :return: colour_bar_object: Colour bar (instance of
+        `matplotlib.pyplot.colorbar`) created by this method.
+    """
+
+    # TODO(thunderhoser): Stop duplicating this between here and utils.py.
+    # TODO(thunderhoser): And replace this with better method.
+
+    if colour_norm_object is None:
+        colour_norm_object = matplotlib.colors.Normalize(
+            vmin=min_colour_value, vmax=max_colour_value, clip=False
+        )
+
+    scalar_mappable_object = pyplot.cm.ScalarMappable(
+        cmap=colour_map_object, norm=colour_norm_object
+    )
+    scalar_mappable_object.set_array(values_to_colour)
+
+    if extend_min and extend_max:
+        extend_string = 'both'
+    elif extend_min:
+        extend_string = 'min'
+    elif extend_max:
+        extend_string = 'max'
+    else:
+        extend_string = 'neither'
+
+    if orientation_string == 'horizontal':
+        padding = 0.075
+    else:
+        padding = 0.05
+
+    colour_bar_object = pyplot.colorbar(
+        ax=axes_object, mappable=scalar_mappable_object,
+        orientation=orientation_string, pad=padding, extend=extend_string,
+        shrink=0.8
+    )
+
+    colour_bar_object.ax.tick_params(labelsize=FONT_SIZE)
+    return colour_bar_object
+
+
 def plot_attributes_diagram(
         figure_object, axes_object, mean_predictions, mean_observations,
         example_counts, mean_value_in_training, min_value_to_plot,
         max_value_to_plot, line_colour=RELIABILITY_LINE_COLOUR,
-        line_style='solid', line_width=RELIABILITY_LINE_WIDTH,
+        line_style='solid', line_width=DEFAULT_LINE_WIDTH,
         inv_mean_observations=None, inv_example_counts=None):
     """Plots attributes diagram.
 
@@ -360,3 +588,153 @@ def plot_attributes_diagram(
         max_value_to_plot=max_value_to_plot,
         line_colour=line_colour, line_style=line_style, line_width=line_width
     )
+
+
+def plot_roc_curve(axes_object, pod_by_threshold, pofd_by_threshold,
+                   line_colour=ROC_CURVE_COLOUR, plot_background=True):
+    """Plots ROC (receiver operating characteristic) curve.
+
+    T = number of probability thresholds
+
+    :param axes_object: Instance of `matplotlib.axes._subplots.AxesSubplot`.
+    :param pod_by_threshold: length-T numpy array of POD (probability of
+        detection) values.
+    :param pofd_by_threshold: length-T numpy array of POFD (probability of false
+        detection) values.
+    :param line_colour: Line colour.
+    :param plot_background: Boolean flag.  If True, will plot background
+        (reference line and Peirce-score contours).
+    :return: line_handle: Line handle for ROC curve.
+    """
+
+    if plot_background:
+        pofd_matrix, pod_matrix = _get_pofd_pod_grid()
+        peirce_score_matrix = pod_matrix - pofd_matrix
+
+        this_colour_map_object, this_colour_norm_object = (
+            _get_peirce_colour_scheme()
+        )
+
+        pyplot.contourf(
+            pofd_matrix, pod_matrix, peirce_score_matrix, PEIRCE_SCORE_LEVELS,
+            cmap=this_colour_map_object, norm=this_colour_norm_object, vmin=0.,
+            vmax=1., axes=axes_object
+        )
+
+        colour_bar_object = _add_colour_bar(
+            axes_object=axes_object, values_to_colour=peirce_score_matrix,
+            colour_map_object=this_colour_map_object,
+            colour_norm_object=this_colour_norm_object,
+            orientation_string='vertical', extend_min=False, extend_max=False
+        )
+
+        colour_bar_object.set_label('Peirce score (POD minus POFD)')
+
+        random_x_coords = numpy.array([0, 1], dtype=float)
+        random_y_coords = numpy.array([0, 1], dtype=float)
+        axes_object.plot(
+            random_x_coords, random_y_coords, color=REFERENCE_LINE_COLOUR,
+            linestyle='dashed', linewidth=REFERENCE_LINE_WIDTH
+        )
+
+    nan_flags = numpy.logical_or(
+        numpy.isnan(pofd_by_threshold), numpy.isnan(pod_by_threshold)
+    )
+
+    if numpy.all(nan_flags):
+        line_handle = None
+    else:
+        real_indices = numpy.where(numpy.invert(nan_flags))[0]
+
+        line_handle = axes_object.plot(
+            pofd_by_threshold[real_indices], pod_by_threshold[real_indices],
+            color=line_colour, linestyle='solid', linewidth=DEFAULT_LINE_WIDTH
+        )[0]
+
+    axes_object.set_xlabel('POFD (probability of false detection)')
+    axes_object.set_ylabel('POD (probability of detection)')
+    axes_object.set_xlim(0., 1.)
+    axes_object.set_ylim(0., 1.)
+
+    return line_handle
+
+
+def plot_performance_diagram(
+        axes_object, pod_by_threshold, success_ratio_by_threshold,
+        line_colour=PERF_DIAGRAM_COLOUR, plot_background=True):
+    """Plots performance diagram.
+
+    T = number of probability thresholds
+
+    :param axes_object: Instance of `matplotlib.axes._subplots.AxesSubplot`.
+    :param pod_by_threshold: length-T numpy array of POD (probability of
+        detection) values.
+    :param success_ratio_by_threshold: length-T numpy array of success ratios.
+    :param line_colour: Line colour.
+    :param plot_background: Boolean flag.  If True, will plot background
+        (frequency-bias and CSI contours).
+    :return: line_handle: Line handle for ROC curve.
+    """
+
+    if plot_background:
+        success_ratio_matrix, pod_matrix = _get_sr_pod_grid()
+        csi_matrix = _csi_from_sr_and_pod(
+            success_ratio_array=success_ratio_matrix, pod_array=pod_matrix
+        )
+        frequency_bias_matrix = _bias_from_sr_and_pod(
+            success_ratio_array=success_ratio_matrix, pod_array=pod_matrix
+        )
+
+        this_colour_map_object, this_colour_norm_object = (
+            _get_csi_colour_scheme()
+        )
+        pyplot.contourf(
+            success_ratio_matrix, pod_matrix, csi_matrix, CSI_LEVELS,
+            cmap=this_colour_map_object, norm=this_colour_norm_object, vmin=0.,
+            vmax=1., axes=axes_object
+        )
+
+        colour_bar_object = _add_colour_bar(
+            axes_object=axes_object, values_to_colour=csi_matrix,
+            colour_map_object=this_colour_map_object,
+            colour_norm_object=this_colour_norm_object,
+            orientation_string='vertical', extend_min=False, extend_max=False
+        )
+        colour_bar_object.set_label('CSI (critical success index)')
+
+        bias_colour_tuple = tuple(FREQ_BIAS_COLOUR.tolist())
+        bias_colours_2d_tuple = ()
+        for _ in range(len(FREQ_BIAS_LEVELS)):
+            bias_colours_2d_tuple += (bias_colour_tuple,)
+
+        bias_contour_object = pyplot.contour(
+            success_ratio_matrix, pod_matrix, frequency_bias_matrix,
+            FREQ_BIAS_LEVELS, colors=bias_colours_2d_tuple,
+            linewidths=FREQ_BIAS_WIDTH, linestyles='dashed', axes=axes_object
+        )
+        pyplot.clabel(
+            bias_contour_object, inline=True, inline_spacing=FREQ_BIAS_PADDING,
+            fmt=FREQ_BIAS_STRING_FORMAT, fontsize=FONT_SIZE
+        )
+
+    nan_flags = numpy.logical_or(
+        numpy.isnan(success_ratio_by_threshold), numpy.isnan(pod_by_threshold)
+    )
+
+    if numpy.all(nan_flags):
+        line_handle = None
+    else:
+        real_indices = numpy.where(numpy.invert(nan_flags))[0]
+
+        line_handle = axes_object.plot(
+            success_ratio_by_threshold[real_indices],
+            pod_by_threshold[real_indices], color=line_colour,
+            linestyle='solid', linewidth=DEFAULT_LINE_WIDTH
+        )[0]
+
+    axes_object.set_xlabel('Success ratio (1 - FAR)')
+    axes_object.set_ylabel('POD (probability of detection)')
+    axes_object.set_xlim(0., 1.)
+    axes_object.set_ylim(0., 1.)
+
+    return line_handle
