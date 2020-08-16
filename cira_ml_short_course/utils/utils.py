@@ -1068,13 +1068,12 @@ def eval_binary_classifn(
     area_under_roc_curve = sklearn_auc(x=pofd_by_threshold, y=pod_by_threshold)
 
     if create_plots:
-        figure_object, axes_object_matrix = create_paneled_figure(
-            num_rows=2, num_columns=2
+        _, axes_object = pyplot.subplots(
+            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
         )
-        axes_object_matrix[1, 1].axis('off')
 
         evaluation_plotting.plot_roc_curve(
-            axes_object=axes_object_matrix[0, 0],
+            axes_object=axes_object,
             pod_by_threshold=pod_by_threshold,
             pofd_by_threshold=pofd_by_threshold
         )
@@ -1082,7 +1081,7 @@ def eval_binary_classifn(
         title_string = '{0:s} ROC curve (AUC = {1:.3f})'.format(
             dataset_name, area_under_roc_curve
         )
-        axes_object_matrix[0, 0].set_title(title_string)
+        axes_object.set_title(title_string)
     else:
         figure_object = None
         axes_object_matrix = None
@@ -1097,8 +1096,12 @@ def eval_binary_classifn(
     max_csi = numpy.nanmax(csi_by_threshold)
 
     if create_plots:
+        _, axes_object = pyplot.subplots(
+            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+        )
+
         evaluation_plotting.plot_performance_diagram(
-            axes_object=axes_object_matrix[0, 1],
+            axes_object=axes_object,
             pod_by_threshold=pod_by_threshold,
             success_ratio_by_threshold=success_ratio_by_threshold
         )
@@ -1106,7 +1109,7 @@ def eval_binary_classifn(
         title_string = '{0:s} performance diagram (max CSI = {1:.3f})'.format(
             dataset_name, max_csi
         )
-        axes_object_matrix[0, 1].set_title(title_string)
+        axes_object.set_title(title_string)
 
     mean_forecast_probs, event_frequencies, example_counts = (
         _get_reliability_curve(
@@ -1131,8 +1134,12 @@ def eval_binary_classifn(
     brier_skill_score = (resolution - reliability) / uncertainty
 
     if create_plots:
+        figure_object, axes_object = pyplot.subplots(
+            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+        )
+        
         evaluation_plotting.plot_attributes_diagram(
-            figure_object=figure_object, axes_object=axes_object_matrix[1, 0],
+            figure_object=figure_object, axes_object=axes_object,
             mean_predictions=mean_forecast_probs,
             mean_observations=event_frequencies,
             example_counts=example_counts,
@@ -1140,13 +1147,13 @@ def eval_binary_classifn(
             min_value_to_plot=0., max_value_to_plot=1.
         )
 
-        axes_object_matrix[1, 0].set_xlabel(r'Forecast probability')
-        axes_object_matrix[1, 0].set_ylabel(r'Conditional event frequency')
+        axes_object.set_xlabel(r'Forecast probability')
+        axes_object.set_ylabel(r'Conditional event frequency')
 
         title_string = '{0:s} attributes diagram (BSS = {1:.3f})'.format(
             dataset_name, brier_skill_score
         )
-        axes_object_matrix[1, 0].set_title(title_string)
+        axes_object.set_title(title_string)
         pyplot.show()
 
     evaluation_dict = {

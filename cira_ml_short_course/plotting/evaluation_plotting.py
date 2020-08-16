@@ -712,7 +712,7 @@ def plot_performance_diagram(
             FREQ_BIAS_LEVELS, colors=bias_colours_2d_tuple,
             linewidths=FREQ_BIAS_WIDTH, linestyles='dashed', axes=axes_object
         )
-        pyplot.clabel(
+        axes_object.clabel(
             bias_contour_object, inline=True, inline_spacing=FREQ_BIAS_PADDING,
             fmt=FREQ_BIAS_STRING_FORMAT, fontsize=FONT_SIZE
         )
