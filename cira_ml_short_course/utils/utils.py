@@ -369,6 +369,71 @@ def _get_points_in_perf_diagram(observed_labels, forecast_probabilities):
     return pod_by_threshold, success_ratio_by_threshold
 
 
+def create_paneled_figure(
+        num_rows, num_columns, figure_width_inches=FIGURE_WIDTH_INCHES,
+        figure_height_inches=FIGURE_HEIGHT_INCHES,
+        horizontal_spacing=0.075, vertical_spacing=0., shared_x_axis=False,
+        shared_y_axis=False, keep_aspect_ratio=True):
+    """Creates paneled figure.
+
+    This method only initializes the panels.  It does not plot anything.
+
+    J = number of panel rows
+    K = number of panel columns
+
+    :param num_rows: J in the above discussion.
+    :param num_columns: K in the above discussion.
+    :param figure_width_inches: Width of the entire figure (including all
+        panels).
+    :param figure_height_inches: Height of the entire figure (including all
+        panels).
+    :param horizontal_spacing: Spacing (in figure-relative coordinates, from
+        0...1) between adjacent panel columns.
+    :param vertical_spacing: Spacing (in figure-relative coordinates, from
+        0...1) between adjacent panel rows.
+    :param shared_x_axis: Boolean flag.  If True, all panels will share the same
+        x-axis.
+    :param shared_y_axis: Boolean flag.  If True, all panels will share the same
+        y-axis.
+    :param keep_aspect_ratio: Boolean flag.  If True, the aspect ratio of each
+        panel will be preserved (reflect the aspect ratio of the data plotted
+        therein).
+    :return: figure_object: Figure handle (instance of
+        `matplotlib.figure.Figure`).
+    :return: axes_object_matrix: J-by-K numpy array of axes handles (instances
+        of `matplotlib.axes._subplots.AxesSubplot`).
+    """
+
+    figure_object, axes_object_matrix = pyplot.subplots(
+        num_rows, num_columns, sharex=shared_x_axis, sharey=shared_y_axis,
+        figsize=(figure_width_inches, figure_height_inches)
+    )
+
+    if num_rows == num_columns == 1:
+        axes_object_matrix = numpy.full(
+            (1, 1), axes_object_matrix, dtype=object
+        )
+
+    if num_rows == 1 or num_columns == 1:
+        axes_object_matrix = numpy.reshape(
+            axes_object_matrix, (num_rows, num_columns)
+        )
+
+    pyplot.subplots_adjust(
+        left=0.02, bottom=0.02, right=0.98, top=0.95,
+        hspace=horizontal_spacing, wspace=vertical_spacing
+    )
+
+    if not keep_aspect_ratio:
+        return figure_object, axes_object_matrix
+
+    for i in range(num_rows):
+        for j in range(num_columns):
+            axes_object_matrix[i][j].set(aspect='equal')
+
+    return figure_object, axes_object_matrix
+
+
 def time_string_to_unix(time_string, time_format):
     """Converts time from string to Unix format.
 
@@ -1003,20 +1068,24 @@ def eval_binary_classifn(
     area_under_roc_curve = sklearn_auc(x=pofd_by_threshold, y=pod_by_threshold)
 
     if create_plots:
-        _, axes_object = pyplot.subplots(
-            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+        figure_object, axes_object_matrix = create_paneled_figure(
+            num_rows=2, num_columns=2
         )
+        axes_object_matrix[1, 1].axis('off')
 
         evaluation_plotting.plot_roc_curve(
-            axes_object=axes_object, pod_by_threshold=pod_by_threshold,
+            axes_object=axes_object_matrix[0, 0],
+            pod_by_threshold=pod_by_threshold,
             pofd_by_threshold=pofd_by_threshold
         )
 
         title_string = '{0:s} ROC curve (AUC = {1:.3f})'.format(
             dataset_name, area_under_roc_curve
         )
-        axes_object.set_title(title_string)
-        pyplot.show()
+        axes_object_matrix[0, 0].set_title(title_string)
+    else:
+        figure_object = None
+        axes_object_matrix = None
 
     pod_by_threshold, success_ratio_by_threshold = _get_points_in_perf_diagram(
         observed_labels=observed_labels,
@@ -1028,20 +1097,16 @@ def eval_binary_classifn(
     max_csi = numpy.nanmax(csi_by_threshold)
 
     if create_plots:
-        _, axes_object = pyplot.subplots(
-            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
-        )
-
         evaluation_plotting.plot_performance_diagram(
-            axes_object=axes_object, pod_by_threshold=pod_by_threshold,
+            axes_object=axes_object_matrix[0, 1],
+            pod_by_threshold=pod_by_threshold,
             success_ratio_by_threshold=success_ratio_by_threshold
         )
 
         title_string = '{0:s} performance diagram (max CSI = {1:.3f})'.format(
             dataset_name, max_csi
         )
-        axes_object.set_title(title_string)
-        pyplot.show()
+        axes_object_matrix[0, 1].set_title(title_string)
 
     mean_forecast_probs, event_frequencies, example_counts = (
         _get_reliability_curve(
@@ -1066,12 +1131,8 @@ def eval_binary_classifn(
     brier_skill_score = (resolution - reliability) / uncertainty
 
     if create_plots:
-        figure_object, axes_object = pyplot.subplots(
-            1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
-        )
-
         evaluation_plotting.plot_attributes_diagram(
-            figure_object=figure_object, axes_object=axes_object,
+            figure_object=figure_object, axes_object=axes_object_matrix[1, 0],
             mean_predictions=mean_forecast_probs,
             mean_observations=event_frequencies,
             example_counts=example_counts,
@@ -1079,13 +1140,13 @@ def eval_binary_classifn(
             min_value_to_plot=0., max_value_to_plot=1.
         )
 
-        axes_object.set_xlabel(r'Forecast probability')
-        axes_object.set_ylabel(r'Conditional event frequency')
+        axes_object_matrix[1, 0].set_xlabel(r'Forecast probability')
+        axes_object_matrix[1, 0].set_ylabel(r'Conditional event frequency')
 
         title_string = '{0:s} attributes diagram (BSS = {1:.3f})'.format(
             dataset_name, brier_skill_score
         )
-        axes_object.set_title(title_string)
+        axes_object_matrix[1, 0].set_title(title_string)
         pyplot.show()
 
     evaluation_dict = {
