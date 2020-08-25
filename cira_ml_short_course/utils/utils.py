@@ -8,6 +8,8 @@ import numpy
 import pandas
 import matplotlib.colors
 from matplotlib import pyplot
+import tensorflow.keras.layers as layers
+import tensorflow.python.keras.backend as K
 from scipy.spatial.distance import cdist
 from scipy.cluster.hierarchy import linkage, dendrogram
 from sklearn.metrics import auc as sklearn_auc
@@ -61,6 +63,11 @@ BAR_GRAPH_EDGE_WIDTH = 2
 BAR_GRAPH_FONT_SIZE = 14
 BAR_GRAPH_FONT_COLOUR = numpy.array([217, 95, 2], dtype=float) / 255
 
+GREEN_COLOUR = numpy.array([27, 158, 119], dtype=float) / 255
+ORANGE_COLOUR = numpy.array([217, 95, 2], dtype=float) / 255
+PURPLE_COLOUR = numpy.array([117, 112, 179], dtype=float) / 255
+GREY_COLOUR = numpy.full(3, 152. / 255)
+
 FONT_SIZE = 20
 pyplot.rc('font', size=FONT_SIZE)
 pyplot.rc('axes', titlesize=FONT_SIZE)
@@ -76,6 +83,17 @@ DATE_FORMAT_REGEX = '[0-9][0-9][0-9][0-9][0-1][0-9][0-3][0-9]'
 
 RANDOM_SEED = 6695
 LAMBDA_TOLERANCE = 1e-10
+
+ELU_FUNCTION_NAME = 'elu'
+RELU_FUNCTION_NAME = 'relu'
+SELU_FUNCTION_NAME = 'selu'
+TANH_FUNCTION_NAME = 'tanh'
+SIGMOID_FUNCTION_NAME = 'sigmoid'
+
+ACTIVATION_FUNCTION_NAMES = [
+    ELU_FUNCTION_NAME, RELU_FUNCTION_NAME, SELU_FUNCTION_NAME,
+    TANH_FUNCTION_NAME, SIGMOID_FUNCTION_NAME
+]
 
 
 def _tabular_file_name_to_date(csv_file_name):
@@ -367,6 +385,39 @@ def _get_points_in_perf_diagram(observed_labels, forecast_probabilities):
     )
 
     return pod_by_threshold, success_ratio_by_threshold
+
+
+def _do_activation(input_values, function_name, alpha_for_relu=0.2):
+    """Runs input array through activation function.
+
+    :param input_values: numpy array (any shape).
+    :param function_name: Name of activation function.
+    :param alpha: Slope parameter (alpha) for activation function.  This applies
+        only for eLU and ReLU.
+    :return: output_values: Same as `input_values` but post-activation.
+    """
+
+    assert function_name in ACTIVATION_FUNCTION_NAMES
+
+    input_object = K.placeholder()
+
+    if function_name == ELU_FUNCTION_NAME:
+        function_object = K.function(
+            [input_object],
+            [layers.ELU(alpha=alpha_for_relu)(input_object)]
+        )
+    elif function_name == RELU_FUNCTION_NAME:
+        function_object = K.function(
+            [input_object],
+            [layers.LeakyReLU(alpha=alpha_for_relu)(input_object)]
+        )
+    else:
+        function_object = K.function(
+            [input_object],
+            [layers.Activation(function_name)(input_object)]
+        )
+
+    return function_object([input_values])[0]
 
 
 def create_paneled_figure(
@@ -1082,9 +1133,6 @@ def eval_binary_classifn(
             dataset_name, area_under_roc_curve
         )
         axes_object.set_title(title_string)
-    else:
-        figure_object = None
-        axes_object_matrix = None
 
     pod_by_threshold, success_ratio_by_threshold = _get_points_in_perf_diagram(
         observed_labels=observed_labels,
@@ -1137,7 +1185,7 @@ def eval_binary_classifn(
         figure_object, axes_object = pyplot.subplots(
             1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
         )
-        
+
         evaluation_plotting.plot_attributes_diagram(
             figure_object=figure_object, axes_object=axes_object,
             mean_predictions=mean_forecast_probs,
@@ -1473,4 +1521,74 @@ def plot_ahc_dendrogram(training_predictor_table, num_levels_to_show):
     )
 
     axes_object.set_yticks([], [])
+    pyplot.show()
+
+
+def plot_basic_activations():
+    """Plots basic activation functions."""
+
+    function_names = [
+        SIGMOID_FUNCTION_NAME, TANH_FUNCTION_NAME, RELU_FUNCTION_NAME
+    ]
+    function_names_verbose = ['Sigmoid', 'tanh', 'ReLU']
+    input_values = numpy.linspace(-3, 3, num=1000, dtype=float)
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+    axes_object.plot(
+        input_values, numpy.zeros(input_values.shape),
+        linewidth=2, linestyle='dashed', color=GREY_COLOUR
+    )
+
+    function_colours = [GREEN_COLOUR, ORANGE_COLOUR, PURPLE_COLOUR]
+
+    for i in range(len(function_names)):
+        these_output_values = _do_activation(
+            input_values=input_values, function_name=function_names[i],
+            alpha_for_relu=0.
+        )
+        axes_object.plot(
+            input_values, these_output_values, linewidth=4, linestyle='solid',
+            color=function_colours[i], label=function_names_verbose[i]
+        )
+
+    axes_object.legend(loc='upper left')
+    axes_object.set_xlabel('Input (before activation)')
+    axes_object.set_ylabel('Output (after activation)')
+    pyplot.show()
+
+
+def plot_fancy_activations():
+    """Plots fancy activation functions."""
+
+    function_names = [
+        SELU_FUNCTION_NAME, ELU_FUNCTION_NAME, RELU_FUNCTION_NAME
+    ]
+    function_names_verbose = ['SeLU', 'eLU', 'Leaky ReLU']
+    input_values = numpy.linspace(-3, 3, num=1000, dtype=float)
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+    axes_object.plot(
+        input_values, numpy.zeros(input_values.shape),
+        linewidth=2, linestyle='dashed', color=GREY_COLOUR
+    )
+
+    function_colours = [GREEN_COLOUR, ORANGE_COLOUR, PURPLE_COLOUR]
+
+    for i in range(len(function_names)):
+        these_output_values = _do_activation(
+            input_values=input_values, function_name=function_names[i],
+            alpha_for_relu=0.2
+        )
+        axes_object.plot(
+            input_values, these_output_values, linewidth=4, linestyle='solid',
+            color=function_colours[i], label=function_names_verbose[i]
+        )
+
+    axes_object.legend(loc='upper left')
+    axes_object.set_xlabel('Input (before activation)')
+    axes_object.set_ylabel('Output (after activation)')
     pyplot.show()
