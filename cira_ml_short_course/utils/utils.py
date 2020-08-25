@@ -1,6 +1,8 @@
 """Helper methods."""
 
+import copy
 import glob
+import errno
 import os.path
 import time
 import calendar
@@ -8,6 +10,8 @@ import numpy
 import pandas
 import matplotlib.colors
 from matplotlib import pyplot
+import keras
+import tensorflow.keras as tf_keras
 import tensorflow.keras.layers as layers
 import tensorflow.python.keras.backend as K
 from scipy.spatial.distance import cdist
@@ -19,6 +23,7 @@ from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.cluster import KMeans, AgglomerativeClustering
 from cira_ml_short_course.plotting import evaluation_plotting
+from cira_ml_short_course.utils import keras_metrics as custom_metrics
 
 # TODO(thunderhoser): Split this into different modules.
 
@@ -94,6 +99,45 @@ ACTIVATION_FUNCTION_NAMES = [
     ELU_FUNCTION_NAME, RELU_FUNCTION_NAME, SELU_FUNCTION_NAME,
     TANH_FUNCTION_NAME, SIGMOID_FUNCTION_NAME
 ]
+
+KERNEL_INITIALIZER_NAME = 'glorot_uniform'
+BIAS_INITIALIZER_NAME = 'zeros'
+
+METRIC_FUNCTION_LIST = [
+    custom_metrics.accuracy, custom_metrics.binary_accuracy,
+    custom_metrics.binary_csi, custom_metrics.binary_frequency_bias,
+    custom_metrics.binary_pod, custom_metrics.binary_pofd,
+    custom_metrics.binary_peirce_score, custom_metrics.binary_success_ratio,
+    custom_metrics.binary_focn
+]
+
+# TODO(thunderhoser): Remove word "binary" from these scores.
+METRIC_FUNCTION_DICT = {
+    'accuracy': custom_metrics.accuracy,
+    'binary_accuracy': custom_metrics.binary_accuracy,
+    'binary_csi': custom_metrics.binary_csi,
+    'binary_frequency_bias': custom_metrics.binary_frequency_bias,
+    'binary_pod': custom_metrics.binary_pod,
+    'binary_pofd': custom_metrics.binary_pofd,
+    'binary_peirce_score': custom_metrics.binary_peirce_score,
+    'binary_success_ratio': custom_metrics.binary_success_ratio,
+    'binary_focn': custom_metrics.binary_focn
+}
+
+DEFAULT_NEURON_COUNTS = numpy.array([1000, 178, 32, 6, 1], dtype=int)
+DEFAULT_DROPOUT_RATES = numpy.array([0.5, 0.5, 0.5, 0.5, 0])
+DEFAULT_INNER_ACTIV_FUNCTION_NAME = copy.deepcopy(RELU_FUNCTION_NAME)
+DEFAULT_INNER_ACTIV_FUNCTION_ALPHA = 0.2
+DEFAULT_OUTPUT_ACTIV_FUNCTION_NAME = copy.deepcopy(SIGMOID_FUNCTION_NAME)
+DEFAULT_OUTPUT_ACTIV_FUNCTION_ALPHA = 0.
+DEFAULT_L1_WEIGHT = 0.
+DEFAULT_L2_WEIGHT = 0.001
+
+PLATEAU_PATIENCE_EPOCHS = 5
+PLATEAU_LEARNING_RATE_MULTIPLIER = 0.6
+PLATEAU_COOLDOWN_EPOCHS = 0
+EARLY_STOPPING_PATIENCE_EPOCHS = 10
+LOSS_PATIENCE = 0.
 
 
 def _tabular_file_name_to_date(csv_file_name):
@@ -387,12 +431,12 @@ def _get_points_in_perf_diagram(observed_labels, forecast_probabilities):
     return pod_by_threshold, success_ratio_by_threshold
 
 
-def _do_activation(input_values, function_name, alpha_for_relu=0.2):
+def _do_activation(input_values, function_name, slope_param=0.2):
     """Runs input array through activation function.
 
     :param input_values: numpy array (any shape).
     :param function_name: Name of activation function.
-    :param alpha: Slope parameter (alpha) for activation function.  This applies
+    :param slope_param: Slope parameter (alpha) for activation function.  Used
         only for eLU and ReLU.
     :return: output_values: Same as `input_values` but post-activation.
     """
@@ -404,12 +448,12 @@ def _do_activation(input_values, function_name, alpha_for_relu=0.2):
     if function_name == ELU_FUNCTION_NAME:
         function_object = K.function(
             [input_object],
-            [layers.ELU(alpha=alpha_for_relu)(input_object)]
+            [layers.ELU(alpha=slope_param)(input_object)]
         )
     elif function_name == RELU_FUNCTION_NAME:
         function_object = K.function(
             [input_object],
-            [layers.LeakyReLU(alpha=alpha_for_relu)(input_object)]
+            [layers.LeakyReLU(alpha=slope_param)(input_object)]
         )
     else:
         function_object = K.function(
@@ -418,6 +462,114 @@ def _do_activation(input_values, function_name, alpha_for_relu=0.2):
         )
 
     return function_object([input_values])[0]
+
+
+def _get_weight_regularizer(l1_weight, l2_weight):
+    """Creates regularizer for neural-net weights.
+
+    :param l1_weight: L1 regularization weight.  This "weight" is not to be
+        confused with those being regularized (weights learned by the net).
+    :param l2_weight: L2 regularization weight.
+    :return: regularizer_object: Instance of `keras.regularizers.l1_l2`.
+    """
+
+    l1_weight = numpy.nanmax(numpy.array([l1_weight, 0.]))
+    l2_weight = numpy.nanmax(numpy.array([l2_weight, 0.]))
+
+    return keras.regularizers.l1_l2(l1=l1_weight, l2=l2_weight)
+
+
+def _get_dense_layer(num_output_units, weight_regularizer=None):
+    """Creates dense (fully connected) layer.
+
+    :param num_output_units: Number of output units (or "features" or
+        "neurons").
+    :param weight_regularizer: Will be used to regularize weights in the new
+        layer.  This may be instance of `keras.regularizers` or None (if you
+        want no regularization).
+    :return: layer_object: Instance of `keras.layers.Dense`.
+    """
+
+    return keras.layers.Dense(
+        num_output_units, activation=None, use_bias=True,
+        kernel_initializer=KERNEL_INITIALIZER_NAME,
+        bias_initializer=BIAS_INITIALIZER_NAME,
+        kernel_regularizer=weight_regularizer,
+        bias_regularizer=weight_regularizer
+    )
+
+
+def _get_activation_layer(function_name, slope_param=0.2):
+    """Creates activation layer.
+
+    :param function_name: Name of activation function.
+    :param slope_param: Slope parameter (alpha) for activation function.  Used
+        only for eLU and ReLU.
+    :return: layer_object: Instance of `keras.layers.Activation`,
+        `keras.layers.ELU`, or `keras.layers.LeakyReLU`.
+    """
+
+    assert function_name in ACTIVATION_FUNCTION_NAMES
+
+    if function_name == ELU_FUNCTION_NAME:
+        return keras.layers.ELU(alpha=slope_param)
+
+    if function_name == RELU_FUNCTION_NAME:
+        if slope_param <= 0:
+            return keras.layers.ReLU()
+
+        return keras.layers.LeakyReLU(alpha=slope_param)
+
+    return keras.layers.Activation(function_name)
+
+
+def _get_dropout_layer(dropout_fraction):
+    """Creates dropout layer.
+
+    :param dropout_fraction: Fraction of weights to drop.
+    :return: layer_object: Instance of `keras.layers.Dropout`.
+    """
+
+    assert dropout_fraction > 0.
+    assert dropout_fraction < 1.
+
+    return keras.layers.Dropout(rate=dropout_fraction)
+
+
+def _get_batch_norm_layer():
+    """Creates batch-normalization layer.
+
+    :return: Instance of `keras.layers.BatchNormalization`.
+    """
+
+    return keras.layers.BatchNormalization(
+        axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True
+    )
+
+
+def _mkdir_recursive_if_necessary(directory_name=None, file_name=None):
+    """Creates directory if necessary (i.e., doesn't already exist).
+
+    This method checks for the argument `directory_name` first.  If
+    `directory_name` is None, this method checks for `file_name` and extracts
+    the directory.
+
+    :param directory_name: Path to local directory.
+    :param file_name: Path to local file.
+    """
+
+    if directory_name is None:
+        directory_name = os.path.dirname(file_name)
+    if directory_name == '':
+        return
+
+    try:
+        os.makedirs(directory_name)
+    except OSError as this_error:
+        if this_error.errno == errno.EEXIST and os.path.isdir(directory_name):
+            pass
+        else:
+            raise
 
 
 def create_paneled_figure(
@@ -1546,7 +1698,7 @@ def plot_basic_activations():
     for i in range(len(function_names)):
         these_output_values = _do_activation(
             input_values=input_values, function_name=function_names[i],
-            alpha_for_relu=0.
+            slope_param=0.
         )
         axes_object.plot(
             input_values, these_output_values, linewidth=4, linestyle='solid',
@@ -1581,7 +1733,7 @@ def plot_fancy_activations():
     for i in range(len(function_names)):
         these_output_values = _do_activation(
             input_values=input_values, function_name=function_names[i],
-            alpha_for_relu=0.2
+            slope_param=0.2
         )
         axes_object.plot(
             input_values, these_output_values, linewidth=4, linestyle='solid',
@@ -1592,3 +1744,167 @@ def plot_fancy_activations():
     axes_object.set_xlabel('Input (before activation)')
     axes_object.set_ylabel('Output (after activation)')
     pyplot.show()
+
+
+def setup_dense_net(
+        num_predictors, neuron_counts=DEFAULT_NEURON_COUNTS,
+        dropout_rates=DEFAULT_DROPOUT_RATES,
+        inner_activ_function_name=DEFAULT_INNER_ACTIV_FUNCTION_NAME,
+        inner_activ_function_alpha=DEFAULT_INNER_ACTIV_FUNCTION_ALPHA,
+        output_activ_function_name=DEFAULT_OUTPUT_ACTIV_FUNCTION_NAME,
+        output_activ_function_alpha=DEFAULT_OUTPUT_ACTIV_FUNCTION_ALPHA,
+        l1_weight=DEFAULT_L1_WEIGHT, l2_weight=DEFAULT_L2_WEIGHT,
+        use_batch_normalization=True):
+    """Sets up (but does not train) dense neural network for binary classifn.
+
+    This method sets up the architecture, loss function, and optimizer.
+
+    D = number of dense layers
+
+    :param num_predictors: Number of input (predictor) variables.
+    :param neuron_counts: length-D numpy array with number of neurons for each
+        dense layer.  The last value in this array is the number of target
+        variables (predictands).
+    :param dropout_rates: length-D numpy array with dropout rate for each dense
+        layer.  To turn off dropout for a given layer, use NaN or a non-positive
+        number.
+    :param inner_activ_function_name: Name of activation function for all inner
+        (non-output) layers.
+    :param inner_activ_function_alpha: Alpha (slope parameter) for
+        activation function for all inner layers.  Applies only to ReLU and eLU.
+    :param output_activ_function_name: Same as `inner_activ_function_name` but
+        for output layer.
+    :param output_activ_function_alpha: Same as `inner_activ_function_alpha` but
+        for output layer.
+    :param l1_weight: Weight for L_1 regularization.
+    :param l2_weight: Weight for L_2 regularization.
+    :param use_batch_normalization: Boolean flag.  If True, will use batch
+        normalization after each inner layer.
+
+    :return: model_object: Untrained instance of `keras.models.Model`.
+    """
+
+    # TODO(thunderhoser): Allow for tasks other than binary classification.
+    assert neuron_counts[-1] == 1
+
+    input_layer_object = keras.layers.Input(shape=(num_predictors,))
+    regularizer_object = _get_weight_regularizer(
+        l1_weight=l1_weight, l2_weight=l2_weight
+    )
+
+    num_layers = len(neuron_counts)
+    layer_object = None
+
+    for i in range(num_layers):
+        if layer_object is None:
+            this_input_layer_object = input_layer_object
+        else:
+            this_input_layer_object = layer_object
+
+        layer_object = _get_dense_layer(
+            num_output_units=neuron_counts[i],
+            weight_regularizer=regularizer_object
+        )(this_input_layer_object)
+
+        if i == num_layers - 1:
+            layer_object = _get_activation_layer(
+                function_name=output_activ_function_name,
+                slope_param=output_activ_function_alpha
+            )(layer_object)
+        else:
+            layer_object = _get_activation_layer(
+                function_name=inner_activ_function_name,
+                slope_param=inner_activ_function_alpha
+            )(layer_object)
+
+        if dropout_rates[i] > 0:
+            layer_object = _get_dropout_layer(
+                dropout_fraction=dropout_rates[i]
+            )(layer_object)
+
+        if use_batch_normalization and i != num_layers - 1:
+            layer_object = _get_batch_norm_layer()(layer_object)
+
+    model_object = keras.models.Model(
+        inputs=input_layer_object, outputs=layer_object
+    )
+
+    model_object.compile(
+        loss=keras.losses.binary_crossentropy,
+        optimizer=keras.optimizers.Adam(),
+        metrics=METRIC_FUNCTION_LIST
+    )
+
+    model_object.summary()
+    return model_object
+
+
+def train_dense_net(
+        model_object, output_dir_name, num_epochs,
+        training_predictor_table, training_target_table,
+        validation_predictor_table, validation_target_table):
+    """Trains dense neural network.
+
+    :param model_object: Untrained network (instance of `keras.models.Model`
+        or `keras.models.Sequential`).
+    :param output_dir_name: Path to output directory (model and training history
+        will be saved here).
+    :param num_epochs: Number of training epochs.
+    :param training_predictor_table: See doc for `read_tabular_file`.
+    :param training_target_table: Same.
+    :param validation_predictor_table: Same.
+    :param validation_target_table: Same.
+    """
+
+    _mkdir_recursive_if_necessary(directory_name=output_dir_name)
+
+    model_file_name = (
+        output_dir_name + '/model_epoch={epoch:03d}_val-loss={val_loss:.6f}.h5'
+    )
+
+    history_object = keras.callbacks.CSVLogger(
+        filename='{0:s}/history.csv'.format(output_dir_name),
+        separator=',', append=False
+    )
+    checkpoint_object = keras.callbacks.ModelCheckpoint(
+        filepath=model_file_name, monitor='val_loss', verbose=1,
+        save_best_only=True, save_weights_only=False, mode='min', period=1
+    )
+    early_stopping_object = keras.callbacks.EarlyStopping(
+        monitor='val_loss', min_delta=LOSS_PATIENCE,
+        patience=EARLY_STOPPING_PATIENCE_EPOCHS, verbose=1, mode='min'
+    )
+    plateau_object = keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss', factor=PLATEAU_LEARNING_RATE_MULTIPLIER,
+        patience=PLATEAU_PATIENCE_EPOCHS, verbose=1, mode='min',
+        min_delta=LOSS_PATIENCE, cooldown=PLATEAU_COOLDOWN_EPOCHS
+    )
+
+    list_of_callback_objects = [
+        history_object, checkpoint_object, early_stopping_object, plateau_object
+    ]
+
+    model_object.fit(
+        x=training_predictor_table.to_numpy(),
+        y=training_target_table[TARGET_NAME].values, batch_size=1024,
+        epochs=num_epochs, steps_per_epoch=None, shuffle=True, verbose=1,
+        callbacks=list_of_callback_objects,
+        validation_data=(
+            validation_predictor_table.to_numpy(),
+            validation_target_table[TARGET_NAME].values
+        ),
+        validation_steps=None
+    )
+
+
+def read_dense_net(hdf5_file_name):
+    """Reads dense neural network from HDF5 file.
+
+    :param hdf5_file_name: Path to input file.
+    :return: model_object: Instance of `keras.models.Model` or
+        `keras.models.Sequential`.
+    """
+
+    return tf_keras.models.load_model(
+        hdf5_file_name, custom_objects=METRIC_FUNCTION_DICT
+    )
