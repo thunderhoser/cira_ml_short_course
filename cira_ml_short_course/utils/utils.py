@@ -1886,12 +1886,12 @@ def train_dense_net(
 
     model_object.fit(
         x=training_predictor_table.to_numpy(),
-        y=training_target_table[TARGET_NAME].values, batch_size=1024,
-        epochs=num_epochs, steps_per_epoch=None, shuffle=True, verbose=1,
-        callbacks=list_of_callback_objects,
+        y=training_target_table[BINARIZED_TARGET_NAME].values,
+        batch_size=1024, epochs=num_epochs, steps_per_epoch=None, shuffle=True,
+        verbose=1, callbacks=list_of_callback_objects,
         validation_data=(
             validation_predictor_table.to_numpy(),
-            validation_target_table[TARGET_NAME].values
+            validation_target_table[BINARIZED_TARGET_NAME].values
         ),
         validation_steps=None
     )
