@@ -1950,7 +1950,7 @@ def apply_dense_net(
 
         class_probabilities[these_indices] = model_object.predict(
             predictor_matrix[these_indices, ...], batch_size=len(these_indices)
-        )
+        )[:, 0]
 
     if verbose:
         print('Have applied dense net to all {0:d} examples!'.format(
