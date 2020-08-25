@@ -1908,3 +1908,53 @@ def read_dense_net(hdf5_file_name):
     return tf_keras.models.load_model(
         hdf5_file_name, custom_objects=METRIC_FUNCTION_DICT
     )
+
+
+def apply_dense_net(
+        model_object, predictor_matrix, num_examples_per_batch, verbose=True):
+    """Applies trained dense neural network to new data.
+
+    E = number of examples
+    P = number of predictor variables
+
+    :param model_object: Trained network (instance of `keras.models.Model`
+        or `keras.models.Sequential`).
+    :param predictor_matrix: E-by-P numpy array of predictors, in the same
+        format as those used to train the network.
+    :param num_examples_per_batch: Batch size.
+    :param verbose: Boolean flag.  If True, will print progress messages.
+    :return: event_probabilities: length-E numpy array of event probabilities
+        (probabilities of class = 1).
+    """
+
+    num_examples = predictor_matrix.shape[0]
+    class_probabilities = numpy.full(num_examples, numpy.nan)
+
+    for i in range(0, num_examples, num_examples_per_batch):
+        this_first_index = i
+        this_last_index = min(
+            [i + num_examples_per_batch - 1, num_examples - 1]
+        )
+
+        these_indices = numpy.linspace(
+            this_first_index, this_last_index,
+            num=this_last_index - this_first_index + 1, dtype=int
+        )
+
+        if verbose:
+            print((
+                'Applying dense net to examples {0:d}-{1:d} of {2:d}...'
+            ).format(
+                this_first_index + 1, this_last_index + 1, num_examples
+            ))
+
+        class_probabilities[these_indices] = model_object.predict(
+            predictor_matrix[these_indices, ...], batch_size=len(these_indices)
+        )
+
+    if verbose:
+        print('Have applied dense net to all {0:d} examples!'.format(
+            num_examples
+        ))
+
+    return class_probabilities
