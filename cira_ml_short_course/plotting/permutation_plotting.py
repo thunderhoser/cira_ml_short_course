@@ -20,17 +20,8 @@ ERROR_BAR_DICT = {'alpha': 1., 'linewidth': 4, 'capthick': 4}
 
 BAR_TEXT_COLOUR = numpy.full(3, 0.)
 BAR_FONT_SIZE = 18
-DEFAULT_FONT_SIZE = 30
 FIGURE_WIDTH_INCHES = 10
 FIGURE_HEIGHT_INCHES = 10
-
-pyplot.rc('font', size=DEFAULT_FONT_SIZE)
-pyplot.rc('axes', titlesize=DEFAULT_FONT_SIZE)
-pyplot.rc('axes', labelsize=DEFAULT_FONT_SIZE)
-pyplot.rc('xtick', labelsize=DEFAULT_FONT_SIZE)
-pyplot.rc('ytick', labelsize=DEFAULT_FONT_SIZE)
-pyplot.rc('legend', fontsize=DEFAULT_FONT_SIZE)
-pyplot.rc('figure', titlesize=DEFAULT_FONT_SIZE)
 
 
 def _label_bars(axes_object, y_tick_coords, y_tick_strings):

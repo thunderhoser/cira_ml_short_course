@@ -2471,6 +2471,12 @@ def run_backwards_test(
     print('Finding original cost (before *de*permutation)...')
     orig_cost_estimates = _bootstrap_cost(
         observed_labels=target_classes,
+        forecast_probabilities=prediction_function(clean_predictor_matrix),
+        cost_function=cost_function, num_replicates=num_bootstrap_reps
+    )
+    
+    orig_cost_estimates = _bootstrap_cost(
+        observed_labels=target_classes,
         forecast_probabilities=prediction_function(predictor_matrix),
         cost_function=cost_function, num_replicates=num_bootstrap_reps
     )
