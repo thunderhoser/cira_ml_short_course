@@ -54,6 +54,13 @@ MAX_CSI_KEY = 'max_csi'
 BRIER_SCORE_KEY = 'brier_score'
 BRIER_SKILL_SCORE_KEY = 'brier_skill_score'
 
+PREDICTORS_KEY = 'predictor_matrix'
+PERMUTED_FLAGS_KEY = 'permuted_flags'
+PERMUTED_INDICES_KEY = 'permuted_predictor_indices'
+PERMUTED_COSTS_KEY = 'permuted_cost_matrix'
+DEPERMUTED_INDICES_KEY = 'depermuted_predictor_indices'
+DEPERMUTED_COSTS_KEY = 'depermuted_cost_matrix'
+
 # Plotting constants.
 FIGURE_WIDTH_INCHES = 10
 FIGURE_HEIGHT_INCHES = 10
@@ -83,6 +90,9 @@ pyplot.rc('legend', fontsize=FONT_SIZE)
 pyplot.rc('figure', titlesize=FONT_SIZE)
 
 # Misc constants.
+SEPARATOR_STRING = '\n\n' + '*' * 50 + '\n\n'
+MINOR_SEPARATOR_STRING = '\n\n' + '-' * 50 + '\n\n'
+
 DATE_FORMAT = '%Y%m%d'
 DATE_FORMAT_REGEX = '[0-9][0-9][0-9][0-9][0-1][0-9][0-3][0-9]'
 
@@ -138,6 +148,15 @@ PLATEAU_LEARNING_RATE_MULTIPLIER = 0.6
 PLATEAU_COOLDOWN_EPOCHS = 0
 EARLY_STOPPING_PATIENCE_EPOCHS = 10
 LOSS_PATIENCE = 0.
+
+DEFAULT_NUM_BOOTSTRAP_REPS = 1000
+
+ORIGINAL_COST_KEY = 'orig_cost_estimates'
+BEST_PREDICTORS_KEY = 'best_predictor_names'
+BEST_COSTS_KEY = 'best_cost_matrix'
+STEP1_PREDICTORS_KEY = 'step1_predictor_names'
+STEP1_COSTS_KEY = 'step1_cost_matrix'
+BACKWARDS_FLAG_KEY = 'is_backwards_test'
 
 
 def _tabular_file_name_to_date(csv_file_name):
@@ -1958,3 +1977,542 @@ def apply_dense_net(
         ))
 
     return class_probabilities
+
+
+def _permute_values(
+        predictor_matrix, predictor_index, permuted_values=None):
+    """Permutes values of one predictor variable across all examples.
+
+    E = number of examples
+    P = number of predictor variables
+
+    :param predictor_matrix: E-by-P numpy array of predictor values.
+    :param predictor_index: Will permute values only for this predictor.
+    :param permuted_values: length-E numpy array of permuted values to replace
+        original ones.  If None, values will be permuted on the fly.
+    :return: predictor_matrix: Same as input but with desired values permuted.
+    :return: permuted_values: See input doc.  If input was None, this will be a
+        new array created on the fly.  If input was specified, this will be the
+        same as input.
+    """
+
+    if permuted_values is None:
+        random_indices = numpy.random.permutation(predictor_matrix.shape[0])
+        permuted_values = predictor_matrix[random_indices, predictor_index]
+
+    predictor_matrix[:, predictor_index] = permuted_values
+
+    return predictor_matrix, permuted_values
+
+
+def _depermute_values(
+        predictor_matrix, clean_predictor_matrix, predictor_index):
+    """Depermutes (cleans up) values of one predictor variable.
+
+    :param predictor_matrix: See doc for `_permute_values`.
+    :param clean_predictor_matrix: Clean version of `predictor_matrix` (with no
+        values permuted).
+    :param predictor_index: See doc for `_permute_values`.
+    :return: predictor_matrix: Same as input but with desired values depermuted.
+    """
+
+    predictor_matrix[..., predictor_index] = (
+        clean_predictor_matrix[..., predictor_index]
+    )
+
+    return predictor_matrix
+
+
+def _bootstrap_cost(observed_labels, forecast_probabilities, cost_function,
+                    num_replicates):
+    """Uses bootstrapping to estimate cost.
+
+    E = number of examples
+
+    :param observed_labels: length-E numpy array of true classes (integers in
+        0...1).
+    :param forecast_probabilities: length-E numpy array of event probabilities
+        (probabilities of class = 1).
+    :param cost_function: Cost function.  Must be negatively oriented (i.e.,
+        lower is better), with the following inputs and outputs.
+    Input: observed_labels: See above.
+    Input: forecast_probabilities: See above.
+    Output: cost: Scalar value.
+
+    :param num_replicates: Number of bootstrap replicates (i.e., number of times
+        to estimate cost).
+    :return: cost_estimates: length-B numpy array of cost estimates, where B =
+        number of bootstrap replicates.
+    """
+
+    cost_estimates = numpy.full(num_replicates, numpy.nan)
+
+    if num_replicates == 1:
+        cost_estimates[0] = cost_function(
+            observed_labels, forecast_probabilities
+        )
+    else:
+        num_examples = len(observed_labels)
+        example_indices = numpy.linspace(
+            0, num_examples - 1, num=num_examples, dtype=int
+        )
+
+        for k in range(num_replicates):
+            these_indices = numpy.random.choice(
+                example_indices, size=num_examples, replace=True
+            )
+
+            cost_estimates[k] = cost_function(
+                observed_labels[these_indices],
+                forecast_probabilities[these_indices]
+            )
+
+    print('Average cost estimate over {0:d} replicates = {1:f}'.format(
+        num_replicates, numpy.mean(cost_estimates)
+    ))
+
+    return cost_estimates
+
+
+def _run_forward_test_one_step(
+        predictor_matrix, target_classes, prediction_function, permuted_flags,
+        cost_function, num_bootstrap_reps):
+    """Runs one step of the forward permutation test.
+
+    E = number of examples
+    P = number of predictor variables
+
+    :param predictor_matrix: E-by-P numpy array of predictor values.
+    :param target_classes: length-E numpy array of true classes (integers in
+        0...1).
+    :param prediction_function: Function with the following inputs and outputs.
+    Input: predictor_matrix: See above.
+    Output: event_probabilities: length-E numpy array of event probabilities
+        (probabilities of class = 1).
+
+    :param permuted_flags: length-P numpy array of Boolean flags, indicating
+        which predictors have already been permuted.
+    :param cost_function: See doc for `_bootstrap_cost`.
+    :param num_bootstrap_reps: Same.
+    :return: result_dict: Dictionary with the following keys, where N = number
+        of permutations done in this step and B = number of bootstrap
+        replicates.
+    result_dict['predictor_matrix']: Same as input but with more values
+        permuted.
+    result_dict['permuted_flags']: Same as input but with more `True`
+        flags.
+    result_dict['permuted_predictor_indices']: length-N numpy array with indices
+        of predictors permuted.
+    result_dict['permuted_cost_matrix']: N-by-B numpy array of costs after
+        permutation.
+    """
+
+    if numpy.all(permuted_flags):
+        return None
+
+    # Housekeeping.
+    num_predictors = predictor_matrix.shape[1]
+    permuted_predictor_indices = []
+    permuted_cost_matrix = numpy.full((0, num_bootstrap_reps), numpy.nan)
+
+    best_cost = -numpy.inf
+    best_predictor_index = -1
+    best_permuted_values = None
+
+    for j in range(num_predictors):
+        if permuted_flags[j]:
+            continue
+
+        permuted_predictor_indices.append(j)
+        print('Permuting {0:d}th of {1:d} predictors...'.format(
+            j + 1, num_predictors
+        ))
+
+        this_predictor_matrix, these_permuted_values = _permute_values(
+            predictor_matrix=predictor_matrix + 0., predictor_index=j
+        )
+        these_event_probs = prediction_function(this_predictor_matrix)
+        this_cost_matrix = _bootstrap_cost(
+            observed_labels=target_classes,
+            forecast_probabilities=these_event_probs,
+            cost_function=cost_function, num_replicates=num_bootstrap_reps
+        )
+
+        this_cost_matrix = numpy.reshape(
+            this_cost_matrix, (1, this_cost_matrix.size)
+        )
+        permuted_cost_matrix = numpy.concatenate(
+            (permuted_cost_matrix, this_cost_matrix), axis=0
+        )
+        this_average_cost = numpy.mean(permuted_cost_matrix[-1, :])
+        if this_average_cost < best_cost:
+            continue
+
+        best_cost = this_average_cost + 0.
+        best_predictor_index = j
+        best_permuted_values = these_permuted_values
+
+    predictor_matrix = _permute_values(
+        predictor_matrix=predictor_matrix,
+        predictor_index=best_predictor_index,
+        permuted_values=best_permuted_values
+    )[0]
+
+    print('Best predictor = {0:d}th (cost = {1:f})'.format(
+        best_predictor_index + 1, best_cost
+    ))
+
+    permuted_flags[best_predictor_index] = True
+    permuted_predictor_indices = numpy.array(
+        permuted_predictor_indices, dtype=int
+    )
+
+    return {
+        PREDICTORS_KEY: predictor_matrix,
+        PERMUTED_FLAGS_KEY: permuted_flags,
+        PERMUTED_INDICES_KEY: permuted_predictor_indices,
+        PERMUTED_COSTS_KEY: permuted_cost_matrix
+    }
+
+
+def _make_prediction_function(model_object):
+    """Creates prediction function for neural network.
+
+    :param model_object: Trained model (instance of `keras.models.Model` or
+        `keras.models.Sequential`).
+    :return: prediction_function: Function defined below.
+    """
+
+    # TODO(thunderhoser): This currently works only for dense neural networks.
+
+    def prediction_function(predictor_matrix):
+        """Prediction function itself.
+
+        :param predictor_matrix: See doc for `_run_forward_test_one_step`.
+        :return: event_probabilities: 1-D numpy array of event probabilities.
+        """
+
+        return apply_dense_net(
+            model_object=model_object,
+            predictor_matrix=predictor_matrix,
+            num_examples_per_batch=1024, verbose=False
+        )
+
+    return prediction_function
+
+
+def _run_backwards_test_one_step(
+        predictor_matrix, clean_predictor_matrix, target_classes,
+        prediction_function, permuted_flags, cost_function, num_bootstrap_reps):
+    """Runs one step of the backwards permutation test.
+
+    :param predictor_matrix: See doc for `_run_forward_test_one_step`.
+    :param clean_predictor_matrix: Clean version of `predictor_matrix` (with no
+        values permuted).
+    :param target_classes: See doc for `_run_forward_test_one_step`.
+    :param prediction_function: Same.
+    :param permuted_flags: Same.
+    :param cost_function: Same.
+    :param num_bootstrap_reps: Same.
+    :return: result_dict: Dictionary with the following keys, where N = number
+        of depermutations done in this step and B = number of bootstrap
+        replicates.
+    result_dict['predictor_matrix']: Same as input but with fewer values
+        permuted.
+    result_dict['permuted_flags']: Same as input but with more `False`
+        flags.
+    result_dict['depermuted_predictor_indices']: length-N numpy array with
+        indices of predictors depermuted.
+    result_dict['depermuted_cost_matrix']: N-by-B numpy array of costs after
+        depermutation.
+    """
+
+    if not numpy.any(permuted_flags):
+        return None
+
+    # Housekeeping.
+    num_predictors = predictor_matrix.shape[1]
+    depermuted_predictor_indices = []
+    depermuted_cost_matrix = numpy.full((0, num_bootstrap_reps), numpy.nan)
+
+    best_cost = numpy.inf
+    best_predictor_index = -1
+
+    for j in range(num_predictors):
+        if not permuted_flags[j]:
+            continue
+
+        depermuted_predictor_indices.append(j)
+        print('Depermuting {0:d}th of {1:d} predictors...'.format(
+            j + 1, num_predictors
+        ))
+
+        this_predictor_matrix = _depermute_values(
+            predictor_matrix=predictor_matrix + 0.,
+            clean_predictor_matrix=clean_predictor_matrix,
+            predictor_index=j
+        )
+        these_event_probs = prediction_function(this_predictor_matrix)
+        this_cost_matrix = _bootstrap_cost(
+            observed_labels=target_classes,
+            forecast_probabilities=these_event_probs,
+            cost_function=cost_function, num_replicates=num_bootstrap_reps
+        )
+
+        this_cost_matrix = numpy.reshape(
+            this_cost_matrix, (1, this_cost_matrix.size)
+        )
+        depermuted_cost_matrix = numpy.concatenate(
+            (depermuted_cost_matrix, this_cost_matrix), axis=0
+        )
+        this_average_cost = numpy.mean(depermuted_cost_matrix[-1, :])
+        if this_average_cost > best_cost:
+            continue
+
+        best_cost = this_average_cost + 0.
+        best_predictor_index = j
+
+    predictor_matrix = _depermute_values(
+        predictor_matrix=predictor_matrix,
+        clean_predictor_matrix=clean_predictor_matrix,
+        predictor_index=best_predictor_index
+    )
+
+    print('Best predictor = {0:d}th (cost = {1:f})'.format(
+        best_predictor_index + 1, best_cost
+    ))
+
+    permuted_flags[best_predictor_index] = False
+    depermuted_predictor_indices = numpy.array(
+        depermuted_predictor_indices, dtype=int
+    )
+
+    return {
+        PREDICTORS_KEY: predictor_matrix,
+        PERMUTED_FLAGS_KEY: permuted_flags,
+        DEPERMUTED_INDICES_KEY: depermuted_predictor_indices,
+        DEPERMUTED_COSTS_KEY: depermuted_cost_matrix
+    }
+
+
+def run_forward_test(
+        predictor_table, target_classes, model_object, cost_function,
+        num_bootstrap_reps=DEFAULT_NUM_BOOTSTRAP_REPS):
+    """Runs forward version of permutation test (both single- and multi-pass).
+
+    B = number of bootstrap replicates
+    P = number of predictor variables
+
+    :param predictor_table: See doc for `read_tabular_file`.
+    :param target_classes: See doc for `_run_forward_test_one_step`.
+    :param model_object: Trained model (instance of `keras.models.Model` or
+        `keras.models.Sequential`).
+    :param cost_function: See doc for `_run_forward_test_one_step`.
+    :param num_bootstrap_reps: Same.
+    :return: result_dict: Dictionary with the following keys.
+    result_dict['orig_cost_estimates']: length-B numpy array with estimates of
+        original cost (before permutation).
+    result_dict['best_predictor_names']: length-P list with best predictor at
+        each step.
+    result_dict['best_cost_matrix']: P-by-B numpy array of costs after
+        permutation at each step.
+    result_dict['step1_predictor_names']: length-P list with predictors in order
+        that they were permuted in step 1.
+    result_dict['step1_cost_matrix']: P-by-B numpy array of costs after
+        permutation in step 1.
+    result_dict['is_backwards_test']: Boolean flag (always False for this
+        method).
+    """
+
+    num_bootstrap_reps = numpy.maximum(num_bootstrap_reps, 1)
+    prediction_function = _make_prediction_function(model_object)
+
+    predictor_matrix = predictor_table.to_numpy()
+    predictor_names = list(predictor_table)
+
+    # Find original cost (before permutation).
+    print('Finding original cost (before permutation)...')
+    orig_cost_estimates = _bootstrap_cost(
+        observed_labels=target_classes,
+        forecast_probabilities=prediction_function(predictor_matrix),
+        cost_function=cost_function, num_replicates=num_bootstrap_reps
+    )
+
+    # Do dirty work.
+    num_predictors = predictor_matrix.shape[1]
+    permuted_flags = numpy.full(num_predictors, False, dtype=bool)
+
+    best_predictor_names = []
+    best_cost_matrix = numpy.full((0, num_bootstrap_reps), numpy.nan)
+    step1_predictor_names = None
+    step1_cost_matrix = None
+
+    step_num = 0
+
+    while True:
+        print(MINOR_SEPARATOR_STRING)
+        step_num += 1
+
+        this_result_dict = _run_forward_test_one_step(
+            predictor_matrix=predictor_matrix,
+            target_classes=target_classes,
+            prediction_function=prediction_function,
+            permuted_flags=permuted_flags,
+            cost_function=cost_function, num_bootstrap_reps=num_bootstrap_reps
+        )
+
+        if this_result_dict is None:
+            break
+
+        predictor_matrix = this_result_dict[PREDICTORS_KEY]
+        permuted_flags = this_result_dict[PERMUTED_FLAGS_KEY]
+
+        these_predictor_names = [
+            predictor_names[k]
+            for k in this_result_dict[PERMUTED_INDICES_KEY]
+        ]
+        this_best_index = numpy.argmax(
+            numpy.mean(this_result_dict[PERMUTED_COSTS_KEY], axis=1)
+        )
+
+        best_predictor_names.append(these_predictor_names[this_best_index])
+        best_cost_matrix = numpy.concatenate((
+            best_cost_matrix,
+            this_result_dict[PERMUTED_COSTS_KEY][[this_best_index], :]
+        ), axis=0)
+
+        print('Best predictor at {0:d}th step = {1:s} ... cost = {2:f}'.format(
+            step_num,
+            best_predictor_names[-1],
+            numpy.mean(best_cost_matrix[-1, :])
+        ))
+
+        if step_num != 1:
+            continue
+
+        step1_predictor_names = copy.deepcopy(these_predictor_names)
+        step1_cost_matrix = this_result_dict[PERMUTED_COSTS_KEY] + 0.
+
+    return {
+        ORIGINAL_COST_KEY: orig_cost_estimates,
+        BEST_PREDICTORS_KEY: best_predictor_names,
+        BEST_COSTS_KEY: best_cost_matrix,
+        STEP1_PREDICTORS_KEY: step1_predictor_names,
+        STEP1_COSTS_KEY: step1_cost_matrix,
+        BACKWARDS_FLAG_KEY: False
+    }
+
+
+def run_backwards_test(
+        predictor_table, target_classes, model_object, cost_function,
+        num_bootstrap_reps=DEFAULT_NUM_BOOTSTRAP_REPS):
+    """Runs backwards version of permutation test (both single- and multi-pass).
+
+    B = number of bootstrap replicates
+    P = number of predictor variables
+
+    :param predictor_table: See doc for `run_forward_test`.
+    :param target_classes: Same.
+    :param model_object: Same.
+    :param cost_function: Same.
+    :param num_bootstrap_reps: Same.
+    :return: result_dict: Dictionary with the following keys.
+    result_dict['orig_cost_estimates']: length-B numpy array with estimates of
+        original cost (before *de*permutation).
+    result_dict['best_predictor_names']: length-P list with best predictor at
+        each step.
+    result_dict['best_cost_matrix']: P-by-B numpy array of costs after
+        *de*permutation at each step.
+    result_dict['step1_predictor_names']: length-P list with predictors in order
+        that they were *de*permuted in step 1.
+    result_dict['step1_cost_matrix']: P-by-B numpy array of costs after
+        *de*permutation in step 1.
+    result_dict['is_backwards_test']: Boolean flag (always True for this
+        method).
+    """
+
+    num_bootstrap_reps = numpy.maximum(num_bootstrap_reps, 1)
+    prediction_function = _make_prediction_function(model_object)
+
+    predictor_matrix = predictor_table.to_numpy()
+    predictor_names = list(predictor_table)
+
+    clean_predictor_matrix = predictor_matrix + 0.
+    num_predictors = len(predictor_names)
+
+    for j in range(num_predictors):
+        predictor_matrix = _permute_values(
+            predictor_matrix=predictor_matrix, predictor_index=j
+        )[0]
+
+    # Find original cost (before *de*permutation).
+    print('Finding original cost (before *de*permutation)...')
+    orig_cost_estimates = _bootstrap_cost(
+        observed_labels=target_classes,
+        forecast_probabilities=prediction_function(predictor_matrix),
+        cost_function=cost_function, num_replicates=num_bootstrap_reps
+    )
+
+    # Do dirty work.
+    permuted_flags = numpy.full(num_predictors, True, dtype=bool)
+
+    best_predictor_names = []
+    best_cost_matrix = numpy.full((0, num_bootstrap_reps), numpy.nan)
+    step1_predictor_names = None
+    step1_cost_matrix = None
+
+    step_num = 0
+
+    while True:
+        print(MINOR_SEPARATOR_STRING)
+        step_num += 1
+
+        this_result_dict = _run_backwards_test_one_step(
+            predictor_matrix=predictor_matrix,
+            clean_predictor_matrix=clean_predictor_matrix,
+            target_classes=target_classes,
+            prediction_function=prediction_function,
+            permuted_flags=permuted_flags,
+            cost_function=cost_function, num_bootstrap_reps=num_bootstrap_reps
+        )
+
+        if this_result_dict is None:
+            break
+
+        predictor_matrix = this_result_dict[PREDICTORS_KEY]
+        permuted_flags = this_result_dict[PERMUTED_FLAGS_KEY]
+
+        these_predictor_names = [
+            predictor_names[k]
+            for k in this_result_dict[DEPERMUTED_INDICES_KEY]
+        ]
+        this_best_index = numpy.argmin(
+            numpy.mean(this_result_dict[DEPERMUTED_COSTS_KEY], axis=1)
+        )
+
+        best_predictor_names.append(these_predictor_names[this_best_index])
+        best_cost_matrix = numpy.concatenate((
+            best_cost_matrix,
+            this_result_dict[DEPERMUTED_COSTS_KEY][[this_best_index], :]
+        ), axis=0)
+
+        print('Best predictor at {0:d}th step = {1:s} ... cost = {2:f}'.format(
+            step_num,
+            best_predictor_names[-1],
+            numpy.mean(best_cost_matrix[-1, :])
+        ))
+
+        if step_num != 1:
+            continue
+
+        step1_predictor_names = copy.deepcopy(these_predictor_names)
+        step1_cost_matrix = this_result_dict[DEPERMUTED_COSTS_KEY] + 0.
+
+    return {
+        ORIGINAL_COST_KEY: orig_cost_estimates,
+        BEST_PREDICTORS_KEY: best_predictor_names,
+        BEST_COSTS_KEY: best_cost_matrix,
+        STEP1_PREDICTORS_KEY: step1_predictor_names,
+        STEP1_COSTS_KEY: step1_cost_matrix,
+        BACKWARDS_FLAG_KEY: True
+    }
