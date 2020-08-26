@@ -29,12 +29,12 @@ from cira_ml_short_course.utils import keras_metrics as custom_metrics
 # TODO(thunderhoser): Split this into different modules.
 
 # Variable names.
-METADATA_COLUMNS = [
+METADATA_COLUMNS_ORIG = [
     'Step_ID', 'Track_ID', 'Ensemble_Name', 'Ensemble_Member', 'Run_Date',
     'Valid_Date', 'Forecast_Hour', 'Valid_Hour_UTC'
 ]
 
-EXTRANEOUS_COLUMNS = [
+EXTRANEOUS_COLUMNS_ORIG = [
     'Duration', 'Centroid_Lon', 'Centroid_Lat', 'Centroid_X', 'Centroid_Y',
     'Storm_Motion_U', 'Storm_Motion_V', 'Matched', 'Max_Hail_Size',
     'Num_Matches', 'Shape', 'Location', 'Scale'
@@ -42,6 +42,69 @@ EXTRANEOUS_COLUMNS = [
 
 TARGET_NAME = 'RVORT1_MAX-future_max'
 BINARIZED_TARGET_NAME = 'strong_future_rotation_flag'
+AREA_NAME = 'area_km2'
+MAJOR_AXIS_NAME = 'major_axis_km'
+MINOR_AXIS_NAME = 'minor_axis_km'
+ORIENTATION_NAME = 'orientation_deg'
+
+METADATA_COLUMNS_ORIG_TO_NEW = {
+    'Step_ID': 'storm_object_name',
+    'Track_ID': 'storm_cell_name',
+    'Ensemble_Name': 'ensemble_name',
+    'Ensemble_Member': 'ensemble_member_name',
+    'Run_Date': 'init_time_string',
+    'Valid_Date': 'valid_time_string',
+    'Forecast_Hour': 'lead_time_hours',
+    'Valid_Hour_UTC': 'valid_hour'
+}
+
+TARGET_COLUMNS_ORIG_TO_NEW = {
+    'RVORT1_MAX-future_max': TARGET_NAME
+}
+
+PREDICTOR_COLUMNS_ORIG_TO_NEW = {
+    'REFL_COM_mean': 'composite_refl_mean_dbz',
+    'REFL_COM_max': 'composite_refl_max_dbz',
+    'REFL_COM_min': 'composite_refl_min_dbz',
+    'REFL_COM_std': 'composite_refl_stdev_dbz',
+    'REFL_COM_percentile_10': 'composite_refl_prctile10_dbz',
+    'REFL_COM_percentile_25': 'composite_refl_prctile25_dbz',
+    'REFL_COM_percentile_50': 'composite_refl_median_dbz',
+    'REFL_COM_percentile_75': 'composite_refl_prctile75_dbz',
+    'REFL_COM_percentile_90': 'composite_refl_prctile90_dbz',
+    'U10_mean': 'u_wind_10metres_mean_m_s01',
+    'U10_max': 'u_wind_10metres_max_m_s01',
+    'U10_min': 'u_wind_10metres_min_m_s01',
+    'U10_std': 'u_wind_10metres_stdev_m_s01',
+    'U10_percentile_10': 'u_wind_10metres_prctile10_m_s01',
+    'U10_percentile_25': 'u_wind_10metres_prctile25_m_s01',
+    'U10_percentile_50': 'u_wind_10metres_median_m_s01',
+    'U10_percentile_75': 'u_wind_10metres_prctile75_m_s01',
+    'U10_percentile_90': 'u_wind_10metres_prctile90_m_s01',
+    'V10_mean': 'v_wind_10metres_mean_m_s01',
+    'V10_max': 'v_wind_10metres_max_m_s01',
+    'V10_min': 'v_wind_10metres_min_m_s01',
+    'V10_std': 'v_wind_10metres_stdev_m_s01',
+    'V10_percentile_10': 'v_wind_10metres_prctile10_m_s01',
+    'V10_percentile_25': 'v_wind_10metres_prctile25_m_s01',
+    'V10_percentile_50': 'v_wind_10metres_median_m_s01',
+    'V10_percentile_75': 'v_wind_10metres_prctile75_m_s01',
+    'V10_percentile_90': 'v_wind_10metres_prctile90_m_s01',
+    'T2_mean': 'temperature_2metres_mean_kelvins',
+    'T2_max': 'temperature_2metres_max_kelvins',
+    'T2_min': 'temperature_2metres_min_kelvins',
+    'T2_std': 'temperature_2metres_stdev_kelvins',
+    'T2_percentile_10': 'temperature_2metres_prctile10_kelvins',
+    'T2_percentile_25': 'temperature_2metres_prctile25_kelvins',
+    'T2_percentile_50': 'temperature_2metres_median_kelvins',
+    'T2_percentile_75': 'temperature_2metres_prctile75_kelvins',
+    'T2_percentile_90': 'temperature_2metres_prctile90_kelvins',
+    'area': AREA_NAME,
+    'eccentricity': 'eccentricity',
+    'major_axis_length': MAJOR_AXIS_NAME,
+    'minor_axis_length': MINOR_AXIS_NAME,
+    'orientation': ORIENTATION_NAME
+}
 
 MAE_KEY = 'mean_absolute_error'
 RMSE_KEY = 'root_mean_squared_error'
@@ -96,6 +159,9 @@ MINOR_SEPARATOR_STRING = '\n\n' + '-' * 50 + '\n\n'
 
 DATE_FORMAT = '%Y%m%d'
 DATE_FORMAT_REGEX = '[0-9][0-9][0-9][0-9][0-1][0-9][0-3][0-9]'
+
+GRID_SPACING_KM = 3.
+RADIANS_TO_DEGREES = 180. / numpy.pi
 
 RANDOM_SEED = 6695
 LAMBDA_TOLERANCE = 1e-10
@@ -735,14 +801,23 @@ def read_tabular_file(csv_file_name):
     """
 
     predictor_table = pandas.read_csv(csv_file_name, header=0, sep=',')
-    predictor_table.drop(EXTRANEOUS_COLUMNS, axis=1, inplace=True)
+    predictor_table.drop(EXTRANEOUS_COLUMNS_ORIG, axis=1, inplace=True)
 
-    metadata_table = predictor_table[METADATA_COLUMNS]
-    predictor_table.drop(METADATA_COLUMNS, axis=1, inplace=True)
+    metadata_table = predictor_table[METADATA_COLUMNS_ORIG]
+    predictor_table.drop(METADATA_COLUMNS_ORIG, axis=1, inplace=True)
 
     target_table = predictor_table[[TARGET_NAME]]
     predictor_table.drop([TARGET_NAME], axis=1, inplace=True)
     predictor_table = _remove_future_data(predictor_table)
+
+    metadata_table.rename(columns=METADATA_COLUMNS_ORIG_TO_NEW, inplace=True)
+    predictor_table.rename(columns=PREDICTOR_COLUMNS_ORIG_TO_NEW, inplace=True)
+    target_table.rename(columns=TARGET_COLUMNS_ORIG_TO_NEW, inplace=True)
+
+    predictor_table[AREA_NAME] *= GRID_SPACING_KM ** 2
+    predictor_table[MAJOR_AXIS_NAME] *= GRID_SPACING_KM
+    predictor_table[MINOR_AXIS_NAME] *= GRID_SPACING_KM
+    predictor_table[ORIENTATION_NAME] *= RADIANS_TO_DEGREES
 
     return metadata_table, predictor_table, target_table
 
@@ -2510,16 +2585,17 @@ def run_backwards_test(
             break
 
         predictor_matrix = this_result_dict[PREDICTORS_KEY]
-        for j in range(num_predictors):
-            print(numpy.allclose(
-                predictor_matrix[:, j], clean_predictor_matrix[:, j], atol=1e-6
-            ))
 
-        _ = _bootstrap_cost(
-            observed_labels=target_classes,
-            forecast_probabilities=prediction_function(predictor_matrix),
-            cost_function=cost_function, num_replicates=num_bootstrap_reps
-        )
+        # for j in range(num_predictors):
+        #     print(numpy.allclose(
+        #         predictor_matrix[:, j], clean_predictor_matrix[:, j], atol=1e-6
+        #     ))
+        #
+        # _ = _bootstrap_cost(
+        #     observed_labels=target_classes,
+        #     forecast_probabilities=prediction_function(predictor_matrix),
+        #     cost_function=cost_function, num_replicates=num_bootstrap_reps
+        # )
 
         permuted_flags = this_result_dict[PERMUTED_FLAGS_KEY]
 

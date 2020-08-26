@@ -12,8 +12,9 @@ dist/
 .idea/
 *.iml
 
-# Slurm scripts.
-slurm/
+# Data.
+data/
 
 # Code that I don't intend to commit.
 ml4rt/*.py
+scratch_space/
