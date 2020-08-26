@@ -2502,6 +2502,11 @@ def run_backwards_test(
             break
 
         predictor_matrix = this_result_dict[PREDICTORS_KEY]
+        for j in range(num_predictors):
+            print(numpy.allclose(
+                predictor_matrix[:, j], clean_predictor_matrix[:, j], atol=1e-6
+            ))
+
         permuted_flags = this_result_dict[PERMUTED_FLAGS_KEY]
 
         these_predictor_names = [

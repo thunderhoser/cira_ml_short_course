@@ -38,7 +38,7 @@ def _label_bars(axes_object, y_tick_coords, y_tick_strings):
 
     N = number of bars
 
-    :param axes_object: Will plot on these axes (instance of
+    :param axes_object: Axes handle (instance of
         `matplotlib.axes._subplots.AxesSubplot`).
     :param y_tick_coords: length-N numpy array with y-coordinates of bars.
     :param y_tick_strings: length-N list of labels.
@@ -104,11 +104,13 @@ def _plot_bars(
     :param multipass_flag: Boolean flag.  If True, plotting multi-pass version
         of test.  If False, plotting single-pass version.
     :param confidence_level: Confidence level for error bars (in range 0...1).
-    :param axes_object: Will plot on these axes (instance of
+    :param axes_object: Axes handle (instance of
         `matplotlib.axes._subplots.AxesSubplot`).  If None, will create new
         axes.
     :param bar_face_colour: Interior colour (in any format accepted by
         matplotlib), used for each bar in the graph.
+    :return: axes_object: Axes handle (instance of
+        `matplotlib.axes._subplots.AxesSubplot`).
     """
 
     mean_clean_cost = numpy.mean(clean_cost_array)
@@ -204,6 +206,8 @@ def _plot_bars(
         numpy.min(y_tick_coords) - 0.75, numpy.max(y_tick_coords) + 0.75
     )
 
+    return axes_object
+
 
 def plot_single_pass_test(
         result_dict, bar_face_colour=DEFAULT_FACE_COLOUR,
@@ -219,6 +223,8 @@ def plot_single_pass_test(
     :param num_predictors_to_plot: Number of predictors to plot.  Will plot only
         the K most important, where K = `num_predictors_to_plot`.  If None, will
         plot all predictors.
+    :return: axes_object: Axes handle (instance of
+        `matplotlib.axes._subplots.AxesSubplot`).
     """
 
     # Check input args.
@@ -262,7 +268,7 @@ def plot_single_pass_test(
     else:
         clean_cost_array = original_cost_array
 
-    _plot_bars(
+    return _plot_bars(
         cost_matrix=cost_matrix, clean_cost_array=clean_cost_array,
         predictor_names=predictor_names,
         backwards_flag=backwards_flag, multipass_flag=False,
@@ -282,6 +288,8 @@ def plot_multipass_test(
     :param confidence_level: Same.
     :param axes_object: Same.
     :param num_predictors_to_plot: Same.
+    :return: axes_object: Axes handle (instance of
+        `matplotlib.axes._subplots.AxesSubplot`).
     """
 
     # Check input args.
@@ -315,7 +323,7 @@ def plot_multipass_test(
     else:
         clean_cost_array = original_cost_array
 
-    _plot_bars(
+    return _plot_bars(
         cost_matrix=cost_matrix, clean_cost_array=clean_cost_array,
         predictor_names=predictor_names,
         backwards_flag=backwards_flag, multipass_flag=True,
