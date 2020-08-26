@@ -16,6 +16,7 @@ import tensorflow.keras.layers as layers
 import tensorflow.python.keras.backend as K
 from scipy.spatial.distance import cdist
 from scipy.cluster.hierarchy import linkage, dendrogram
+from sklearn.metrics import roc_auc_score
 from sklearn.metrics import auc as sklearn_auc
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, \
     SGDClassifier
@@ -2295,8 +2296,26 @@ def _run_backwards_test_one_step(
     }
 
 
+def negative_auc_function(observed_labels, forecast_probabilities):
+    """Computes negative AUC (area under the ROC curve).
+
+    E = number of examples
+
+    :param observed_labels: length-E numpy array of true classes (integers in
+        0...1).
+    :param forecast_probabilities: length-E numpy array of event probabilities
+        (probabilities of class = 1).
+    :return: negative_auc: Negative AUC.
+    """
+
+    return -1 * roc_auc_score(
+        y_true=observed_labels, y_score=forecast_probabilities
+    )
+
+
 def run_forward_test(
-        predictor_table, target_classes, model_object, cost_function,
+        predictor_table, target_classes, model_object,
+        cost_function=negative_auc_function,
         num_bootstrap_reps=DEFAULT_NUM_BOOTSTRAP_REPS):
     """Runs forward version of permutation test (both single- and multi-pass).
 
@@ -2323,6 +2342,8 @@ def run_forward_test(
     result_dict['is_backwards_test']: Boolean flag (always False for this
         method).
     """
+
+    # TODO(thunderhoser): Put this in a different file.
 
     num_bootstrap_reps = numpy.maximum(num_bootstrap_reps, 1)
     prediction_function = _make_prediction_function(model_object)
@@ -2404,7 +2425,8 @@ def run_forward_test(
 
 
 def run_backwards_test(
-        predictor_table, target_classes, model_object, cost_function,
+        predictor_table, target_classes, model_object,
+        cost_function=negative_auc_function,
         num_bootstrap_reps=DEFAULT_NUM_BOOTSTRAP_REPS):
     """Runs backwards version of permutation test (both single- and multi-pass).
 
