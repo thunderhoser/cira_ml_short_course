@@ -2538,3 +2538,133 @@ def run_backwards_test(
         STEP1_COSTS_KEY: step1_cost_matrix,
         BACKWARDS_FLAG_KEY: True
     }
+
+
+def _do_saliency_calculations(
+        model_object, loss_tensor, list_of_input_matrices):
+    """Does saliency calculations.
+
+    T = number of input tensors to the model
+    E = number of examples (storm objects)
+
+    :param model_object: Instance of `keras.models.Model`.
+    :param loss_tensor: Keras tensor defining the loss function.
+    :param list_of_input_matrices: length-T list of numpy arrays, comprising one
+        or more examples (storm objects).  list_of_input_matrices[i] must have
+        the same dimensions as the [i]th input tensor to the model.
+    :return: list_of_saliency_matrices: length-T list of numpy arrays,
+        comprising the saliency map for each example.
+        list_of_saliency_matrices[i] has the same dimensions as
+        list_of_input_matrices[i] and defines the "saliency" of each value x,
+        which is the gradient of the loss function with respect to x.
+    """
+
+    if isinstance(model_object.input, list):
+        list_of_input_tensors = model_object.input
+    else:
+        list_of_input_tensors = [model_object.input]
+
+    list_of_gradient_tensors = K.gradients(loss_tensor, list_of_input_tensors)
+    num_input_tensors = len(list_of_input_tensors)
+
+    for i in range(num_input_tensors):
+        list_of_gradient_tensors[i] /= K.maximum(
+            K.std(list_of_gradient_tensors[i]), K.epsilon()
+        )
+
+    inputs_to_gradients_function = K.function(
+        list_of_input_tensors + [K.learning_phase()], list_of_gradient_tensors
+    )
+
+    list_of_saliency_matrices = inputs_to_gradients_function(
+        list_of_input_matrices + [0]
+    )
+
+    for i in range(num_input_tensors):
+        list_of_saliency_matrices[i] *= -1
+
+    return list_of_saliency_matrices
+
+
+def get_saliency_one_neuron(
+        model_object, predictor_matrix, layer_name, neuron_indices,
+        ideal_activation):
+    """Computes saliency maps with respect to activation of one neuron.
+
+    :param model_object: Trained neural net (instance of `keras.models.Model` or
+        `keras.models.Sequential`).
+    :param predictor_matrix: numpy array of predictors.  Must be formatted in
+        the same way as for training and inference.
+    :param layer_name: Name of layer with relevant neuron.
+    :param neuron_indices: 1-D numpy array with indices of relevant neuron.
+        Must have length D - 1, where D = number of dimensions in layer output.
+        The first dimension is the batch dimension, which always has length
+        `None` in Keras.
+    :param ideal_activation: Ideal neuron activation, used to define loss
+        function.  The loss function will be
+        (neuron_activation - ideal_activation)**2.
+    :return: saliency_matrix: Matrix of saliency values, with same shape as
+        `predictor_matrix`.
+    """
+
+    activation_tensor = None
+
+    for k in neuron_indices[::-1]:
+        if activation_tensor is None:
+            activation_tensor = (
+                model_object.get_layer(name=layer_name).output[..., k]
+            )
+        else:
+            activation_tensor = activation_tensor[..., k]
+
+    # if ideal_activation is None:
+    #     loss_tensor = -K.sign(activation_tensor) * activation_tensor ** 2
+
+    loss_tensor = (activation_tensor - ideal_activation) ** 2
+
+    return _do_saliency_calculations(
+        model_object=model_object, loss_tensor=loss_tensor,
+        list_of_input_matrices=[predictor_matrix]
+    )[0]
+
+
+def plot_saliency(saliency_values, predictor_names):
+    """Plots saliency values.
+
+    P = number of predictor variables
+
+    :param saliency_values: length-P numpy array of saliency values.
+    :param predictor_names: length-P list of predictor names.
+    """
+
+    num_predictors = len(predictor_names)
+    y_coords = numpy.linspace(
+        0, num_predictors - 1, num=num_predictors, dtype=float
+    )
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+
+    axes_object.barh(
+        y_coords, saliency_values, color=BAR_GRAPH_COLOUR,
+        edgecolor=BAR_GRAPH_COLOUR, linewidth=BAR_GRAPH_EDGE_WIDTH
+    )
+
+    pyplot.xlabel('Saliency')
+    pyplot.ylabel('Predictor variable')
+
+    pyplot.yticks([], [])
+    x_tick_values, _ = pyplot.xticks()
+    pyplot.xticks(x_tick_values, rotation=90)
+
+    x_min = numpy.percentile(saliency_values, 1.)
+    x_max = numpy.percentile(saliency_values, 99.)
+    pyplot.xlim([x_min, x_max])
+
+    for j in range(num_predictors):
+        axes_object.text(
+            0, y_coords[j], predictor_names[j], color=BAR_GRAPH_FONT_COLOUR,
+            horizontalalignment='center', verticalalignment='center',
+            fontsize=BAR_GRAPH_FONT_SIZE
+        )
