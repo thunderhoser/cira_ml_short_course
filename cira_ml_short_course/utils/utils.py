@@ -2467,14 +2467,16 @@ def run_backwards_test(
             predictor_matrix=predictor_matrix, predictor_index=j
         )[0]
 
-    # Find original cost (before *de*permutation).
-    print('Finding original cost (before *de*permutation)...')
-    orig_cost_estimates = _bootstrap_cost(
+    # Find cost on clean data (before permutation).
+    print('Finding cost on clean data (before permutation)...')
+    _ = _bootstrap_cost(
         observed_labels=target_classes,
         forecast_probabilities=prediction_function(clean_predictor_matrix),
         cost_function=cost_function, num_replicates=num_bootstrap_reps
     )
-    
+
+    # Find cost on dirty data (before *de*permutation).
+    print('Finding cost on dirty data (before *de*permutation)...')
     orig_cost_estimates = _bootstrap_cost(
         observed_labels=target_classes,
         forecast_probabilities=prediction_function(predictor_matrix),
@@ -2512,6 +2514,12 @@ def run_backwards_test(
             print(numpy.allclose(
                 predictor_matrix[:, j], clean_predictor_matrix[:, j], atol=1e-6
             ))
+
+        _ = _bootstrap_cost(
+            observed_labels=target_classes,
+            forecast_probabilities=prediction_function(predictor_matrix),
+            cost_function=cost_function, num_replicates=num_bootstrap_reps
+        )
 
         permuted_flags = this_result_dict[PERMUTED_FLAGS_KEY]
 
@@ -2551,50 +2559,74 @@ def run_backwards_test(
     }
 
 
-def _do_saliency_calculations(
-        model_object, loss_tensor, list_of_input_matrices):
+def _do_saliency_calculations(model_object, loss_tensor, input_matrices):
     """Does saliency calculations.
 
     T = number of input tensors to the model
-    E = number of examples (storm objects)
+    E = number of examples
 
     :param model_object: Instance of `keras.models.Model`.
     :param loss_tensor: Keras tensor defining the loss function.
-    :param list_of_input_matrices: length-T list of numpy arrays, comprising one
-        or more examples (storm objects).  list_of_input_matrices[i] must have
-        the same dimensions as the [i]th input tensor to the model.
-    :return: list_of_saliency_matrices: length-T list of numpy arrays,
-        comprising the saliency map for each example.
-        list_of_saliency_matrices[i] has the same dimensions as
-        list_of_input_matrices[i] and defines the "saliency" of each value x,
-        which is the gradient of the loss function with respect to x.
+    :param input_matrices: length-T list of numpy arrays, comprising one or more
+        examples.  input_matrices[i] must have the same dimensions as the [i]th
+        input tensor to the model.
+    :return: saliency_matrices: length-T list of numpy arrays, comprising the
+        saliency map for each example.  saliency_matrices[i] has the same
+        dimensions as input_matrices[i] and defines the "saliency" of each value
+        x, which is the gradient of the loss function with respect to x.
     """
 
     if isinstance(model_object.input, list):
-        list_of_input_tensors = model_object.input
+        input_tensors = model_object.input
     else:
-        list_of_input_tensors = [model_object.input]
+        input_tensors = [model_object.input]
 
-    list_of_gradient_tensors = K.gradients(loss_tensor, list_of_input_tensors)
-    num_input_tensors = len(list_of_input_tensors)
+    gradient_tensors = K.gradients(loss_tensor, input_tensors)
+    num_input_tensors = len(input_tensors)
 
     for i in range(num_input_tensors):
-        list_of_gradient_tensors[i] /= K.maximum(
-            K.std(list_of_gradient_tensors[i]), K.epsilon()
+        gradient_tensors[i] /= K.maximum(
+            K.std(gradient_tensors[i]), K.epsilon()
         )
 
     inputs_to_gradients_function = K.function(
-        list_of_input_tensors + [K.learning_phase()], list_of_gradient_tensors
+        input_tensors + [K.learning_phase()], gradient_tensors
     )
 
-    list_of_saliency_matrices = inputs_to_gradients_function(
-        list_of_input_matrices + [0]
-    )
+    saliency_matrices = [None] * num_input_tensors
+    num_examples = input_matrices[0].shape[0]
 
-    for i in range(num_input_tensors):
-        list_of_saliency_matrices[i] *= -1
+    for i in range(num_examples):
+        if numpy.mod(i, 100) == 0:
+            print((
+                'Have computed saliency maps for {0:d} of {1:d} examples...'
+            ).format(
+                i, num_examples
+            ))
 
-    return list_of_saliency_matrices
+        these_input_matrices = [a[[i], ...] for a in input_matrices]
+        these_saliency_matrices = inputs_to_gradients_function(
+            these_input_matrices + [0]
+        )
+
+        if saliency_matrices[0] is None:
+            for j in range(num_input_tensors):
+                these_dim = (
+                    (num_examples,) + these_saliency_matrices[j].shape[1:]
+                )
+                saliency_matrices[j] = numpy.full(these_dim, numpy.nan)
+
+        for j in range(num_input_tensors):
+            saliency_matrices[j][i, ...] = these_saliency_matrices[j][0, ...]
+
+    print('Have computed saliency maps for all {0:d} examples!'.format(
+        num_examples
+    ))
+
+    for j in range(num_input_tensors):
+        saliency_matrices[j] *= -1
+
+    return saliency_matrices
 
 
 def get_saliency_one_neuron(
@@ -2635,7 +2667,7 @@ def get_saliency_one_neuron(
 
     return _do_saliency_calculations(
         model_object=model_object, loss_tensor=loss_tensor,
-        list_of_input_matrices=[predictor_matrix]
+        input_matrices=[predictor_matrix]
     )[0]
 
 
