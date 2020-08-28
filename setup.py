@@ -35,7 +35,8 @@ PACKAGE_REQUIREMENTS = [
     'pandas',
     'shapely',
     'descartes',
-    'geopy'
+    'geopy',
+    'dill'
 ]
 
 if __name__ == '__main__':

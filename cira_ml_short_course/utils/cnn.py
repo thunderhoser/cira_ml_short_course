@@ -1,9 +1,9 @@
 """Helper methods for CNNs (convolutional neural nets)."""
 
 import copy
-import json
 import random
 import os.path
+import dill
 import numpy
 import keras.models
 from cira_ml_short_course.utils import utils, image_utils, \
@@ -23,7 +23,9 @@ METRIC_FUNCTION_DICT = utils.METRIC_FUNCTION_DICT
 
 DEFAULT_INPUT_DIMENSIONS = numpy.array([32, 32, 4], dtype=int)
 DEFAULT_CONV_BLOCK_LAYER_COUNTS = numpy.array([2, 2, 2, 2], dtype=int)
-DEFAULT_CONV_CHANNEL_COUNTS = numpy.array([32, 32, 64, 64, 128, 128, 256, 256], dtype=int)
+DEFAULT_CONV_CHANNEL_COUNTS = numpy.array(
+    [32, 32, 64, 64, 128, 128, 256, 256], dtype=int
+)
 DEFAULT_CONV_DROPOUT_RATES = numpy.full(8, 0.)
 DEFAULT_CONV_FILTER_SIZES = numpy.full(8, 3, dtype=int)
 DEFAULT_DENSE_NEURON_COUNTS = numpy.array([776, 147, 28, 5, 1], dtype=int)
@@ -36,12 +38,19 @@ DEFAULT_L1_WEIGHT = 0.
 DEFAULT_L2_WEIGHT = 0.001
 
 TRAINING_FILES_KEY = 'training_file_names'
+VALIDATION_FILES_KEY = 'validation_file_names'
 NORMALIZATION_DICT_KEY = 'normalization_dict'
 BINARIZATION_THRESHOLD_KEY = 'binarization_threshold'
+NUM_EPOCHS_KEY = 'num_epochs'
 NUM_EXAMPLES_PER_BATCH_KEY = 'num_examples_per_batch'
 NUM_TRAINING_BATCHES_KEY = 'num_training_batches_per_epoch'
-VALIDATION_FILES_KEY = 'validation_file_names'
 NUM_VALIDATION_BATCHES_KEY = 'num_validation_batches_per_epoch'
+
+METADATA_KEYS = [
+    TRAINING_FILES_KEY, VALIDATION_FILES_KEY, NORMALIZATION_DICT_KEY,
+    BINARIZATION_THRESHOLD_KEY, NUM_EPOCHS_KEY, NUM_EXAMPLES_PER_BATCH_KEY,
+    NUM_TRAINING_BATCHES_KEY, NUM_VALIDATION_BATCHES_KEY
+]
 
 
 def _get_2d_conv_layer(
@@ -103,6 +112,97 @@ def _get_2d_pooling_layer(
         strides=(num_rows_per_stride, num_columns_per_stride),
         padding='valid'
     )
+
+
+def _write_metafile(
+        dill_file_name, training_file_names, validation_file_names,
+        normalization_dict, binarization_threshold, num_epochs,
+        num_examples_per_batch, num_training_batches_per_epoch,
+        num_validation_batches_per_epoch):
+    """Writes metadata to Dill file.
+
+    :param dill_file_name: Path to output file.
+    :param training_file_names: See doc for `train_model_with_generator`.
+    :param validation_file_names: Same.
+    :param normalization_dict: Same.
+    :param binarization_threshold: Same.
+    :param num_epochs: Same.
+    :param num_examples_per_batch: Same.
+    :param num_training_batches_per_epoch: Same.
+    :param num_validation_batches_per_epoch: Same.
+    """
+
+    metadata_dict = {
+        TRAINING_FILES_KEY: training_file_names,
+        VALIDATION_FILES_KEY: validation_file_names,
+        NORMALIZATION_DICT_KEY: normalization_dict,
+        BINARIZATION_THRESHOLD_KEY: binarization_threshold,
+        NUM_EPOCHS_KEY: num_epochs,
+        NUM_EXAMPLES_PER_BATCH_KEY: num_examples_per_batch,
+        NUM_TRAINING_BATCHES_KEY: num_training_batches_per_epoch,
+        NUM_VALIDATION_BATCHES_KEY: num_validation_batches_per_epoch
+    }
+
+    utils._mkdir_recursive_if_necessary(file_name=dill_file_name)
+
+    dill_file_handle = open(dill_file_name, 'wb')
+    dill.dump(metadata_dict, dill_file_handle)
+    dill_file_handle.close()
+
+
+def find_metafile(model_dir_name, raise_error_if_missing=True):
+    """Finds metafile for CNN.
+
+    :param model_dir_name: Name of model directory.
+    :param raise_error_if_missing: Boolean flag.  If file is missing and
+        `raise_error_if_missing == True`, will throw error.  If file is missing
+        and `raise_error_if_missing == False`, will return *expected* file path.
+    :return: metafile_name: Path to metafile.
+    """
+
+    metafile_name = '{0:s}/model_metadata.dill'.format(model_dir_name)
+
+    if raise_error_if_missing and not os.path.isfile(metafile_name):
+        error_string = 'Cannot find file.  Expected at: "{0:s}"'.format(
+            metafile_name
+        )
+        raise ValueError(error_string)
+
+    return metafile_name
+
+
+def read_metafile(dill_file_name):
+    """Reads metadata for neural net from Dill file.
+
+    :param dill_file_name: Path to input file.
+    :return: metadata_dict: Dictionary with the following keys.
+    metadata_dict['training_file_names']: See doc for
+        `train_model_with_generator`.
+    metadata_dict['validation_file_names']: Same.
+    metadata_dict['normalization_dict']: Same.
+    metadata_dict['binarization_threshold']: Same.
+    metadata_dict['num_epochs']: Same.
+    metadata_dict['num_examples_per_batch']: Same.
+    metadata_dict['num_training_batches_per_epoch']: Same.
+    metadata_dict['num_validation_batches_per_epoch']: Same.
+
+    :raises: ValueError: if any expected key is not found in dictionary.
+    """
+
+    dill_file_handle = open(dill_file_name, 'rb')
+    metadata_dict = dill.load(dill_file_handle)
+    dill_file_handle.close()
+
+    missing_keys = list(set(METADATA_KEYS) - set(metadata_dict.keys()))
+    if len(missing_keys) == 0:
+        return metadata_dict
+
+    error_string = (
+        '\n{0:s}\nKeys listed above were expected, but not found, in file '
+        '"{1:s}".'
+    ).format(str(missing_keys), dill_file_name)
+
+    raise ValueError(error_string)
 
 
 def setup_cnn(
@@ -261,6 +361,40 @@ def setup_cnn(
     return model_object
 
 
+def create_data(image_file_names, normalization_dict, binarization_threshold):
+    """Creates input data for CNN.
+
+    This method is the same as `data_generator`, except that it returns all the
+    data at once, rather than generating batches on the fly.
+
+    :param image_file_names: See doc for `data_generator`.
+    :param normalization_dict: Same.
+    :param binarization_threshold: Same.
+    :return: predictor_matrix: Same.
+    :return: target_values: Same.
+    :raises: TypeError: if `normalization_dict is None`.
+    """
+
+    image_dict = image_utils.read_many_files(image_file_names)
+
+    predictor_matrix, _ = image_normalization.normalize_data(
+        predictor_matrix=image_dict[image_utils.PREDICTOR_MATRIX_KEY],
+        predictor_names=image_dict[image_utils.PREDICTOR_NAMES_KEY],
+        normalization_dict=normalization_dict
+    )
+
+    target_values = image_thresholding.binarize_target_images(
+        target_matrix=image_dict[image_utils.TARGET_MATRIX_KEY],
+        binarization_threshold=binarization_threshold
+    )
+
+    print('Fraction of examples in positive class: {0:.4f}\n'.format(
+        numpy.mean(target_values)
+    ))
+
+    return predictor_matrix, target_values
+
+
 def data_generator(image_file_names, num_examples_per_batch, normalization_dict,
                    binarization_threshold):
     """Generates training or validation examples on the fly.
@@ -305,7 +439,9 @@ def data_generator(image_file_names, num_examples_per_batch, normalization_dict,
                 image_file_names[file_index]
             ))
 
-            this_image_dict = image_utils.read_file(image_file_names[file_index])
+            this_image_dict = image_utils.read_file(
+                image_file_names[file_index]
+            )
             predictor_names = this_image_dict[image_utils.PREDICTOR_NAMES_KEY]
 
             file_index += 1
@@ -363,43 +499,30 @@ def data_generator(image_file_names, num_examples_per_batch, normalization_dict,
         yield predictor_matrix.astype('float32'), target_values
 
 
-def train_model(
+def train_model_with_generator(
         model_object, training_file_names, validation_file_names,
-        num_examples_per_batch, normalization_dict, binarization_threshold,
-        num_epochs, num_training_batches_per_epoch,
+        normalization_dict, binarization_threshold, num_epochs,
+        num_examples_per_batch, num_training_batches_per_epoch,
         num_validation_batches_per_epoch, output_dir_name):
-    """Trains CNN.
+    """Trains CNN with generator.
 
     :param model_object: Untrained model (instance of `keras.models.Model` or
         `keras.models.Sequential`).
     :param training_file_names: 1-D list of paths to training files (readable by
         `image_utils.read_file`).
     :param validation_file_names: Same but for validation files.
-    :param num_examples_per_batch: See doc for `data_generator`.
-    :param normalization_dict: Same.
+    :param normalization_dict: See doc for `data_generator`.
     :param binarization_threshold: Same.
     :param num_epochs: Number of epochs.
+    :param num_examples_per_batch: Batch size.
     :param num_training_batches_per_epoch: Number of training batches per epoch.
     :param num_validation_batches_per_epoch: Number of validation batches per
         epoch.
-    :param output_dir_name: Path to output directory (model and training history
-        will be saved here).
+    :param output_dir_name: Path to output directory (model will be saved here).
     """
-
-    # TODO(thunderhoser): Write metafile here.
 
     # TODO(thunderhoser): Make this method public.
     utils._mkdir_recursive_if_necessary(directory_name=output_dir_name)
-
-    cnn_metadata_dict = {
-        TRAINING_FILES_KEY: training_file_names,
-        NORMALIZATION_DICT_KEY: normalization_dict,
-        BINARIZATION_THRESHOLD_KEY: binarization_threshold,
-        NUM_EXAMPLES_PER_BATCH_KEY: num_examples_per_batch,
-        NUM_TRAINING_BATCHES_KEY: num_training_batches_per_epoch,
-        VALIDATION_FILES_KEY: validation_file_names,
-        NUM_VALIDATION_BATCHES_KEY: num_validation_batches_per_epoch
-    }
 
     model_file_name = (
         output_dir_name + '/model_epoch={epoch:03d}_val-loss={val_loss:.6f}.h5'
@@ -427,6 +550,21 @@ def train_model(
         history_object, checkpoint_object, early_stopping_object, plateau_object
     ]
 
+    metafile_name = find_metafile(output_dir_name, raise_error_if_missing=False)
+    print('Writing metadata to: "{0:s}"...'.format(metafile_name))
+
+    _write_metafile(
+        dill_file_name=metafile_name,
+        training_file_names=training_file_names,
+        validation_file_names=validation_file_names,
+        normalization_dict=normalization_dict,
+        binarization_threshold=binarization_threshold,
+        num_epochs=num_epochs,
+        num_examples_per_batch=num_examples_per_batch,
+        num_training_batches_per_epoch=num_training_batches_per_epoch,
+        num_validation_batches_per_epoch=num_validation_batches_per_epoch
+    )
+
     training_generator = data_generator(
         image_file_names=training_file_names,
         num_examples_per_batch=num_examples_per_batch,
@@ -450,6 +588,89 @@ def train_model(
     )
 
 
+def train_model_sans_generator(
+        model_object, training_file_names, validation_file_names,
+        num_examples_per_batch, normalization_dict, binarization_threshold,
+        num_epochs, output_dir_name):
+    """Trains CNN without generator.
+
+    :param model_object: See doc for `train_model_with_generator`.
+    :param training_file_names: Same.
+    :param validation_file_names: Same.
+    :param num_examples_per_batch: Same.
+    :param normalization_dict: Same.
+    :param binarization_threshold: Same.
+    :param num_epochs: Same.
+    :param output_dir_name: Same.
+    """
+
+    utils._mkdir_recursive_if_necessary(directory_name=output_dir_name)
+
+    model_file_name = (
+        output_dir_name + '/model_epoch={epoch:03d}_val-loss={val_loss:.6f}.h5'
+    )
+
+    history_object = keras.callbacks.CSVLogger(
+        filename='{0:s}/history.csv'.format(output_dir_name),
+        separator=',', append=False
+    )
+    checkpoint_object = keras.callbacks.ModelCheckpoint(
+        filepath=model_file_name, monitor='val_loss', verbose=1,
+        save_best_only=True, save_weights_only=False, mode='min', period=1
+    )
+    early_stopping_object = keras.callbacks.EarlyStopping(
+        monitor='val_loss', min_delta=LOSS_PATIENCE,
+        patience=EARLY_STOPPING_PATIENCE_EPOCHS, verbose=1, mode='min'
+    )
+    plateau_object = keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss', factor=PLATEAU_LEARNING_RATE_MULTIPLIER,
+        patience=PLATEAU_PATIENCE_EPOCHS, verbose=1, mode='min',
+        min_delta=LOSS_PATIENCE, cooldown=PLATEAU_COOLDOWN_EPOCHS
+    )
+
+    list_of_callback_objects = [
+        history_object, checkpoint_object, early_stopping_object, plateau_object
+    ]
+
+    metafile_name = find_metafile(output_dir_name, raise_error_if_missing=False)
+    print('Writing metadata to: "{0:s}"...'.format(metafile_name))
+
+    _write_metafile(
+        dill_file_name=metafile_name,
+        training_file_names=training_file_names,
+        validation_file_names=validation_file_names,
+        normalization_dict=normalization_dict,
+        binarization_threshold=binarization_threshold,
+        num_epochs=num_epochs,
+        num_examples_per_batch=num_examples_per_batch,
+        num_training_batches_per_epoch=None,
+        num_validation_batches_per_epoch=None
+    )
+
+    training_predictor_matrix, training_target_values = create_data(
+        image_file_names=training_file_names,
+        normalization_dict=normalization_dict,
+        binarization_threshold=binarization_threshold
+    )
+    print('\n')
+
+    validation_predictor_matrix, validation_target_values = create_data(
+        image_file_names=validation_file_names,
+        normalization_dict=normalization_dict,
+        binarization_threshold=binarization_threshold
+    )
+    print('\n')
+
+    model_object.fit(
+        x=training_predictor_matrix, y=training_target_values,
+        batch_size=num_examples_per_batch, epochs=num_epochs,
+        steps_per_epoch=None, shuffle=True, verbose=1,
+        callbacks=list_of_callback_objects,
+        validation_data=(validation_predictor_matrix, validation_target_values),
+        validation_steps=None
+    )
+
+
 def read_model(hdf5_file_name):
     """Reads model from HDF5 file.
 
@@ -462,8 +683,8 @@ def read_model(hdf5_file_name):
     )
 
 
-def apply_cnn(model_object, predictor_matrix, verbose=True,
-              output_layer_name=None):
+def apply_model(model_object, predictor_matrix, verbose=True,
+                output_layer_name=None):
     """Applies trained CNN to new data.
 
     E = number of examples (storm objects)
@@ -541,65 +762,6 @@ def apply_cnn(model_object, predictor_matrix, verbose=True,
     return output_array
 
 
-def apply_upconvnet(
-        cnn_model_object, predictor_matrix, cnn_feature_layer_name,
-        upconvnet_model_object, verbose=True):
-    """Applies trained upconvnet to new data.
-
-    :param cnn_model_object: See doc for `apply_cnn`.
-    :param predictor_matrix: Same.
-    :param cnn_feature_layer_name: See doc for `output_layer_name` in
-        `apply_cnn`.
-    :param upconvnet_model_object: Trained upconvnet (instance of
-        `keras.models.Model` or `keras.models.Sequential`).  The input to the
-        upconvnet is the output from `cnn_feature_layer_name` in the CNN.
-    :param verbose: Boolean flag.  If True, will print progress messages.
-    :return: recon_predictor_matrix: Reconstructed version of input.
-    """
-
-    num_examples = predictor_matrix.shape[0]
-    num_examples_per_batch = 1000
-    recon_predictor_matrix = numpy.full(predictor_matrix.shape, numpy.nan)
-
-    for i in range(0, num_examples, num_examples_per_batch):
-        this_first_index = i
-        this_last_index = min(
-            [i + num_examples_per_batch - 1, num_examples - 1]
-        )
-
-        if verbose:
-            print((
-                'Using upconvnet to reconstruct examples {0:d}-{1:d} of '
-                '{2:d}...'
-            ).format(
-                this_first_index, this_last_index, num_examples
-            ))
-
-        these_indices = numpy.linspace(
-            this_first_index, this_last_index,
-            num=this_last_index - this_first_index + 1, dtype=int
-        )
-
-        this_feature_matrix = apply_cnn(
-            model_object=cnn_model_object,
-            predictor_matrix=predictor_matrix[these_indices, ...],
-            output_layer_name=cnn_feature_layer_name, verbose=False
-        )
-
-        recon_predictor_matrix[these_indices, ...] = (
-            upconvnet_model_object.predict(
-                this_feature_matrix, batch_size=len(these_indices)
-            )
-        )
-
-    if verbose:
-        print('Have used upconvnet to reconstruct all {0:d} examples!'.format(
-            num_examples
-        ))
-
-    return recon_predictor_matrix
-
-
 def get_flattening_layer(cnn_model_object):
     """Finds flattening layer in CNN.
 
@@ -627,70 +789,3 @@ def get_flattening_layer(cnn_model_object):
         raise TypeError(error_string)
 
     return layer_names[flattening_indices[0]]
-
-
-def find_model_metafile(model_file_name, raise_error_if_missing=False):
-    """Finds metafile for CNN.
-
-    :param model_file_name: Path to file with CNN.
-    :param raise_error_if_missing: Boolean flag.  If True and metafile is not
-        found, this method will error out.
-    :return: model_metafile_name: Path to file with metadata.  If file is not
-        found and `raise_error_if_missing = False`, this will be the expected
-        path.
-    :raises: ValueError: if metafile is not found and
-        `raise_error_if_missing = True`.
-    """
-
-    model_directory_name, pathless_model_file_name = os.path.split(
-        model_file_name)
-    model_metafile_name = '{0:s}/{1:s}_metadata.json'.format(
-        model_directory_name, os.path.splitext(pathless_model_file_name)[0]
-    )
-
-    if not os.path.isfile(model_metafile_name) and raise_error_if_missing:
-        error_string = 'Cannot find file.  Expected at: "{0:s}"'.format(
-            model_metafile_name)
-        raise ValueError(error_string)
-
-    return model_metafile_name
-
-
-def write_metadata(cnn_metadata_dict, json_file_name):
-    """Writes metadata for CNN to JSON file.
-
-    :param cnn_metadata_dict: Dictionary with the following keys.
-    cnn_metadata_dict['training_file_names']: 1-D list of paths to training
-        files (readable by `utils.read_image_file`).
-    cnn_metadata_dict['normalization_dict']: See doc for
-        `normalization.normalize_images`.
-    cnn_metadata_dict['binarization_threshold']: Threshold used to binarize
-        target variable.
-    cnn_metadata_dict['num_examples_per_batch']: Number of examples per batch.
-    cnn_metadata_dict['num_training_batches_per_epoch']: Number of training
-        batches per epoch.
-    cnn_metadata_dict['validation_file_names']: 1-D list of paths to validation
-        files (readable by `utils.read_image_file`).
-    cnn_metadata_dict['num_validation_batches_per_epoch']: Number of validation
-        batches per epoch.
-
-    :param json_file_name: Path to output file.
-    """
-
-    utils.create_directory(file_name=json_file_name)
-
-    new_metadata_dict = _metadata_numpy_to_list(cnn_metadata_dict)
-    with open(json_file_name, 'w') as this_file:
-        json.dump(new_metadata_dict, this_file)
-
-
-def read_metadata(json_file_name):
-    """Reads metadata for CNN from JSON file.
-
-    :param json_file_name: Path to output file.
-    :return: cnn_metadata_dict: See doc for `write_metadata`.
-    """
-
-    with open(json_file_name) as this_file:
-        cnn_metadata_dict = json.load(this_file)
-        return _metadata_list_to_numpy(cnn_metadata_dict)
