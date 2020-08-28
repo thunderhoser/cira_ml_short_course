@@ -40,7 +40,7 @@ EXTRANEOUS_COLUMNS_ORIG = [
     'Num_Matches', 'Shape', 'Location', 'Scale'
 ]
 
-TARGET_NAME = 'RVORT1_MAX-future_max'
+TARGET_NAME = 'max_future_vorticity_s01'
 BINARIZED_TARGET_NAME = 'strong_future_rotation_flag'
 AREA_NAME = 'area_km2'
 MAJOR_AXIS_NAME = 'major_axis_km'
