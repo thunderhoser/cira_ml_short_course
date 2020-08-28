@@ -40,6 +40,7 @@ EXTRANEOUS_COLUMNS_ORIG = [
     'Num_Matches', 'Shape', 'Location', 'Scale'
 ]
 
+TARGET_NAME_ORIG = 'RVORT1_MAX-future_max'
 TARGET_NAME = 'max_future_vorticity_s01'
 BINARIZED_TARGET_NAME = 'strong_future_rotation_flag'
 AREA_NAME = 'area_km2'
@@ -59,7 +60,7 @@ METADATA_COLUMNS_ORIG_TO_NEW = {
 }
 
 TARGET_COLUMNS_ORIG_TO_NEW = {
-    'RVORT1_MAX-future_max': TARGET_NAME
+    TARGET_NAME_ORIG: TARGET_NAME
 }
 
 PREDICTOR_COLUMNS_ORIG_TO_NEW = {
@@ -806,8 +807,8 @@ def read_tabular_file(csv_file_name):
     metadata_table = predictor_table[METADATA_COLUMNS_ORIG]
     predictor_table.drop(METADATA_COLUMNS_ORIG, axis=1, inplace=True)
 
-    target_table = predictor_table[[TARGET_NAME]]
-    predictor_table.drop([TARGET_NAME], axis=1, inplace=True)
+    target_table = predictor_table[[TARGET_NAME_ORIG]]
+    predictor_table.drop([TARGET_NAME_ORIG], axis=1, inplace=True)
     predictor_table = _remove_future_data(predictor_table)
 
     metadata_table.rename(columns=METADATA_COLUMNS_ORIG_TO_NEW, inplace=True)
