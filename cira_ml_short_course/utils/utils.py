@@ -14,6 +14,7 @@ import keras
 import tensorflow.keras as tf_keras
 import tensorflow.keras.layers as layers
 import tensorflow.python.keras.backend as K
+from scipy.interpolate import interp1d
 from scipy.spatial.distance import cdist
 from scipy.cluster.hierarchy import linkage, dendrogram
 from sklearn.metrics import roc_auc_score
@@ -125,6 +126,11 @@ PERMUTED_INDICES_KEY = 'permuted_predictor_indices'
 PERMUTED_COSTS_KEY = 'permuted_cost_matrix'
 DEPERMUTED_INDICES_KEY = 'depermuted_predictor_indices'
 DEPERMUTED_COSTS_KEY = 'depermuted_cost_matrix'
+
+HIT_INDICES_KEY = 'hit_indices'
+MISS_INDICES_KEY = 'miss_indices'
+FALSE_ALARM_INDICES_KEY = 'false_alarm_indices'
+CORRECT_NULL_INDICES_KEY = 'correct_null_indices'
 
 # Plotting constants.
 FIGURE_WIDTH_INCHES = 10
@@ -2018,7 +2024,7 @@ def apply_neural_net(
         those used to train the network.
     :param num_examples_per_batch: Batch size.
     :param verbose: Boolean flag.  If True, will print progress messages.
-    :return: event_probabilities: length-E numpy array of event probabilities
+    :return: forecast_probabilities: length-E numpy array of event probabilities
         (probabilities of class = 1).
     """
 
@@ -2161,7 +2167,7 @@ def _run_forward_test_one_step(
     :param target_classes: Same.
     :param prediction_function: Function with the following inputs and outputs.
     Input: predictor_matrix: See above.
-    Output: event_probabilities: length-E numpy array of event probabilities
+    Output: forecast_probabilities: length-E numpy array of event probabilities
         (probabilities of class = 1).
 
     :param permuted_flags: length-P numpy array of Boolean flags, indicating
@@ -2263,7 +2269,7 @@ def _make_prediction_function(model_object):
         """Prediction function itself.
 
         :param predictor_matrix: See doc for `_run_forward_test_one_step`.
-        :return: event_probabilities: 1-D numpy array of event probabilities.
+        :return: forecast_probabilities: 1-D numpy array of event probabilities.
         """
 
         return apply_neural_net(
@@ -2783,3 +2789,189 @@ def plot_saliency(saliency_values, predictor_names):
             horizontalalignment='center', verticalalignment='center',
             fontsize=BAR_GRAPH_FONT_SIZE
         )
+
+
+def find_extreme_examples(
+        observed_labels, forecast_probabilities, num_examples_per_set):
+    """Finds extreme examples.
+
+    There are four sets of examples:
+
+    - best hits
+    - worst false alarms
+    - worst misses
+    - best correct nulls
+
+    E = total number of examples
+    e = number of examples per set
+
+    :param observed_labels: length-E numpy array of class labels (1 for event, 0
+        for non-event).
+    :param forecast_probabilities: length-E numpy array of event probabilities.
+    :param num_examples_per_set: Number of examples in each set.
+
+    :return: extreme_dict: Dictionary with the following keys.
+    extreme_dict['hit_indices']: length-e numpy array with indices of best hits.
+    extreme_dict['miss_indices']: length-e numpy array with indices of worst
+        misses.
+    extreme_dict['false_alarm_indices']: length-e numpy array with indices of
+        worst false alarms.
+    extreme_dict['correct_null_indices']: length-e numpy array with indices of
+        best correct nulls.
+    """
+
+    # Check input args.
+    observed_labels = numpy.round(observed_labels).astype(int)
+    assert numpy.all(observed_labels >= 0)
+    assert numpy.all(observed_labels <= 1)
+    assert len(observed_labels.shape) == 1
+
+    num_examples_total = len(observed_labels)
+
+    assert numpy.all(forecast_probabilities >= 0.)
+    assert numpy.all(forecast_probabilities <= 1.)
+    assert len(forecast_probabilities.shape) == 1
+    assert len(forecast_probabilities) == num_examples_total
+
+    num_examples_per_set = int(numpy.round(num_examples_per_set))
+    assert num_examples_per_set > 0
+
+    positive_indices = numpy.where(observed_labels == 1)[0]
+    negative_indices = numpy.where(observed_labels == 0)[0]
+
+    num_hits = min([
+        num_examples_per_set, len(positive_indices)
+    ])
+    num_misses = min([
+        num_examples_per_set, len(positive_indices)
+    ])
+    num_false_alarms = min([
+        num_examples_per_set, len(negative_indices)
+    ])
+    num_correct_nulls = min([
+        num_examples_per_set, len(negative_indices)
+    ])
+
+    these_indices = numpy.argsort(-1 * forecast_probabilities[positive_indices])
+    hit_indices = positive_indices[these_indices][:num_hits]
+    print('Average event probability for {0:d} best hits = {1:.4f}'.format(
+        num_hits, numpy.mean(forecast_probabilities[hit_indices])
+    ))
+
+    these_indices = numpy.argsort(forecast_probabilities[positive_indices])
+    miss_indices = positive_indices[these_indices][:num_misses]
+    print('Average event probability for {0:d} worst misses = {1:.4f}'.format(
+        num_misses, numpy.mean(forecast_probabilities[miss_indices])
+    ))
+
+    these_indices = numpy.argsort(-1 * forecast_probabilities[negative_indices])
+    false_alarm_indices = negative_indices[these_indices][:num_false_alarms]
+    print((
+        'Average event probability for {0:d} worst false alarms = {1:.4f}'
+    ).format(
+        num_false_alarms, numpy.mean(forecast_probabilities[false_alarm_indices])
+    ))
+
+    these_indices = numpy.argsort(forecast_probabilities[negative_indices])
+    correct_null_indices = negative_indices[these_indices][:num_correct_nulls]
+    print((
+        'Average event probability for {0:d} best correct nulls = {1:.4f}'
+    ).format(
+        num_correct_nulls, numpy.mean(forecast_probabilities[correct_null_indices])
+    ))
+
+    return {
+        HIT_INDICES_KEY: hit_indices,
+        MISS_INDICES_KEY: miss_indices,
+        FALSE_ALARM_INDICES_KEY: false_alarm_indices,
+        CORRECT_NULL_INDICES_KEY: correct_null_indices
+    }
+
+
+def run_pmm_one_variable(field_matrix, max_percentile_level=99.):
+    """Applies PMM (probability-matched means) to one variable.
+
+    :param field_matrix: numpy array with data to be averaged.  The first axis
+        should represent examples, and remaining axes should represent spatial
+        dimensions.
+    :param max_percentile_level: Maximum percentile.  No output value will
+        exceed the [q]th percentile of `field_matrix`, where q =
+        `max_percentile_level`.  Similarly, no output value will be less than
+        the [100 - q]th percentile of `field_matrix`.
+    :return: mean_field_matrix: numpy array with average spatial field.
+        Dimensions are the same as `field_matrix`, except that the first axis is
+        gone.  For instance, if `field_matrix` is 1000 x 32 x 32 (1000 examples
+        x 32 rows x 32 columns), `mean_field_matrix` will be 32 x 32.
+    """
+
+    assert not numpy.any(numpy.isnan(field_matrix))
+    assert len(field_matrix.shape) > 1
+    assert max_percentile_level >= 90.
+    assert max_percentile_level < 100.
+
+    # Pool values over all dimensions and remove extremes.
+    pooled_values = numpy.sort(numpy.ravel(field_matrix))
+    max_pooled_value = numpy.percentile(pooled_values, max_percentile_level)
+    pooled_values = pooled_values[pooled_values <= max_pooled_value]
+
+    min_pooled_value = numpy.percentile(
+        pooled_values, 100 - max_percentile_level
+    )
+    pooled_values = pooled_values[pooled_values >= min_pooled_value]
+
+    # Find ensemble mean at each location (e.g., grid point).
+    mean_field_matrix = numpy.mean(field_matrix, axis=0)
+    mean_field_flattened = numpy.ravel(mean_field_matrix)
+
+    # At each location, replace ensemble mean with the same percentile from the
+    # pooled array.
+    pooled_value_percentiles = numpy.linspace(
+        0, 100, num=len(pooled_values), dtype=float
+    )
+    mean_value_percentiles = numpy.linspace(
+        0, 100, num=len(mean_field_flattened), dtype=float
+    )
+
+    sort_indices = numpy.argsort(mean_field_flattened)
+    unsort_indices = numpy.argsort(sort_indices)
+
+    interp_object = interp1d(
+        pooled_value_percentiles, pooled_values, kind='linear',
+        bounds_error=True, assume_sorted=True
+    )
+
+    mean_field_flattened = interp_object(mean_value_percentiles)
+    mean_field_flattened = mean_field_flattened[unsort_indices]
+    mean_field_matrix = numpy.reshape(
+        mean_field_flattened, mean_field_matrix.shape
+    )
+
+    return mean_field_matrix
+
+
+def run_pmm_many_variables(field_matrix, max_percentile_level=99.):
+    """Applies PMM (probability-matched means) to each variable.
+
+    :param field_matrix: numpy array with data to be averaged.  The first axis
+        should represent examples; the last axis should represent variables; and
+        remaining axes should represent spatial dimensions.
+    :param max_percentile_level: See doc for `run_pmm_one_variable`.
+    :return: mean_field_matrix: numpy array with average spatial fields.
+        Dimensions are the same as `field_matrix`, except that the first axis is
+        gone.  For instance, if `field_matrix` is 1000 x 32 x 32 x 4
+        (1000 examples x 32 rows x 32 columns x 4 variables),
+        `mean_field_matrix` will be 32 x 32 x 4.
+    """
+
+    assert len(field_matrix.shape) > 2
+
+    num_variables = field_matrix.shape[-1]
+    mean_field_matrix = numpy.full(field_matrix.shape[1:], numpy.nan)
+
+    for k in range(num_variables):
+        mean_field_matrix[..., k] = run_pmm_one_variable(
+            field_matrix=field_matrix[..., k],
+            max_percentile_level=max_percentile_level
+        )
+
+    return mean_field_matrix
