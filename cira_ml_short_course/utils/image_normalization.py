@@ -74,12 +74,32 @@ def _get_standard_deviation(intermediate_normalization_dict):
     ))
 
 
-def get_normalization_params(image_file_names):
+def get_normalization_params(image_file_names=None, image_dict=None):
     """Computes normalization params (mean and stdev) for each predictor.
 
+    One of the two input args must be specified.
+
     :param image_file_names: 1-D list of paths to input files.
+    :param image_dict: Dictionary returned by `image_utils.read_file`.
     :return: normalization_dict: See input doc for `normalize_data`.
     """
+
+    if image_dict is not None:
+        predictor_matrix = image_dict[image_utils.PREDICTOR_MATRIX_KEY]
+        means = numpy.mean(predictor_matrix, axis=(0, 1, 2))
+        standard_deviations = numpy.std(
+            predictor_matrix, ddof=1, axis=(0, 1, 2)
+        )
+
+        predictor_names = image_dict[image_utils.PREDICTOR_NAMES_KEY]
+        normalization_dict = {}
+
+        for k in range(len(predictor_names)):
+            normalization_dict[predictor_names[k]] = numpy.array([
+                means[k], standard_deviations[k]
+            ])
+
+        return normalization_dict
 
     predictor_names = None
     norm_dict_by_predictor = None

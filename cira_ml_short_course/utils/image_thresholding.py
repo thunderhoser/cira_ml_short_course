@@ -4,34 +4,40 @@ import numpy
 from cira_ml_short_course.utils import image_utils
 
 
-def get_binarization_threshold(image_file_names, percentile_level):
+def get_binarization_threshold(percentile_level, image_file_names=None,
+                               image_dict=None):
     """Computes binarization threshold for target variable.
 
     Binarization threshold will be [q]th percentile of all image maxima, where
     q = `percentile_level`.
 
-    :param image_file_names: 1-D list of paths to input files.
+    One of the input args `image_file_names` and `image_dict` must be
+    specified.
+
     :param percentile_level: q in the above discussion.
+    :param image_file_names: 1-D list of paths to input files.
+    :param image_dict: Dictionary returned by `image_utils.read_file`.
     :return: binarization_threshold: Binarization threshold (used to turn each
         target image into a yes-or-no label).
     """
 
-    max_target_values = numpy.array([])
+    if image_dict is None:
+        max_target_values = numpy.array([])
 
-    for this_file_name in image_file_names:
-        print('Reading data from: "{0:s}"...'.format(this_file_name))
-        this_image_dict = image_utils.read_file(this_file_name)
+        for this_file_name in image_file_names:
+            print('Reading data from: "{0:s}"...'.format(this_file_name))
+            this_image_dict = image_utils.read_file(this_file_name)
 
-        this_target_matrix = this_image_dict[image_utils.TARGET_MATRIX_KEY]
-        this_num_examples = this_target_matrix.shape[0]
-        these_max_target_values = numpy.full(this_num_examples, numpy.nan)
-
-        for i in range(this_num_examples):
-            these_max_target_values[i] = numpy.max(this_target_matrix[i, ...])
-
-        max_target_values = numpy.concatenate((
-            max_target_values, these_max_target_values
-        ))
+            these_max_target_values = numpy.max(
+                this_image_dict[image_utils.TARGET_MATRIX_KEY], axis=(1, 2)
+            )
+            max_target_values = numpy.concatenate((
+                max_target_values, these_max_target_values
+            ))
+    else:
+        max_target_values = numpy.max(
+            image_dict[image_utils.TARGET_MATRIX_KEY], axis=(1, 2)
+        )
 
     binarization_threshold = numpy.percentile(
         max_target_values, percentile_level
