@@ -2006,17 +2006,16 @@ def read_dense_net(hdf5_file_name):
     )
 
 
-def apply_dense_net(
+def apply_neural_net(
         model_object, predictor_matrix, num_examples_per_batch, verbose=True):
-    """Applies trained dense neural network to new data.
+    """Applies trained neural network (dense or convolutional) to new data.
 
     E = number of examples
-    P = number of predictor variables
 
     :param model_object: Trained network (instance of `keras.models.Model`
         or `keras.models.Sequential`).
-    :param predictor_matrix: E-by-P numpy array of predictors, in the same
-        format as those used to train the network.
+    :param predictor_matrix: numpy array of predictors, in the same format as
+        those used to train the network.
     :param num_examples_per_batch: Batch size.
     :param verbose: Boolean flag.  If True, will print progress messages.
     :return: event_probabilities: length-E numpy array of event probabilities
@@ -2039,7 +2038,7 @@ def apply_dense_net(
 
         if verbose:
             print((
-                'Applying dense net to examples {0:d}-{1:d} of {2:d}...'
+                'Applying neural net to examples {0:d}-{1:d} of {2:d}...'
             ).format(
                 this_first_index + 1, this_last_index + 1, num_examples
             ))
@@ -2049,7 +2048,7 @@ def apply_dense_net(
         )[:, 0]
 
     if verbose:
-        print('Have applied dense net to all {0:d} examples!'.format(
+        print('Have applied neural net to all {0:d} examples!'.format(
             num_examples
         ))
 
@@ -2060,13 +2059,10 @@ def _permute_values(
         predictor_matrix, predictor_index, permuted_values=None):
     """Permutes values of one predictor variable across all examples.
 
-    E = number of examples
-    P = number of predictor variables
-
-    :param predictor_matrix: E-by-P numpy array of predictor values.
+    :param predictor_matrix: See doc for `run_forward_test`.
     :param predictor_index: Will permute values only for this predictor.
-    :param permuted_values: length-E numpy array of permuted values to replace
-        original ones.  If None, values will be permuted on the fly.
+    :param permuted_values: numpy array of permuted values to replace original
+        ones.  If None, values will be permuted on the fly.
     :return: predictor_matrix: Same as input but with desired values permuted.
     :return: permuted_values: See input doc.  If input was None, this will be a
         new array created on the fly.  If input was specified, this will be the
@@ -2075,9 +2071,11 @@ def _permute_values(
 
     if permuted_values is None:
         random_indices = numpy.random.permutation(predictor_matrix.shape[0])
-        permuted_values = predictor_matrix[random_indices, predictor_index]
+        permuted_values = (
+            predictor_matrix[random_indices, ...][..., predictor_index]
+        )
 
-    predictor_matrix[:, predictor_index] = permuted_values
+    predictor_matrix[..., predictor_index] = permuted_values
 
     return predictor_matrix, permuted_values
 
@@ -2086,7 +2084,7 @@ def _depermute_values(
         predictor_matrix, clean_predictor_matrix, predictor_index):
     """Depermutes (cleans up) values of one predictor variable.
 
-    :param predictor_matrix: See doc for `_permute_values`.
+    :param predictor_matrix: See doc for `run_forward_test`.
     :param clean_predictor_matrix: Clean version of `predictor_matrix` (with no
         values permuted).
     :param predictor_index: See doc for `_permute_values`.
@@ -2159,9 +2157,8 @@ def _run_forward_test_one_step(
     E = number of examples
     P = number of predictor variables
 
-    :param predictor_matrix: E-by-P numpy array of predictor values.
-    :param target_classes: length-E numpy array of true classes (integers in
-        0...1).
+    :param predictor_matrix: See doc for `run_forward_test`.
+    :param target_classes: Same.
     :param prediction_function: Function with the following inputs and outputs.
     Input: predictor_matrix: See above.
     Output: event_probabilities: length-E numpy array of event probabilities
@@ -2188,7 +2185,7 @@ def _run_forward_test_one_step(
         return None
 
     # Housekeeping.
-    num_predictors = predictor_matrix.shape[1]
+    num_predictors = predictor_matrix.shape[-1]
     permuted_predictor_indices = []
     permuted_cost_matrix = numpy.full((0, num_bootstrap_reps), numpy.nan)
 
@@ -2260,7 +2257,7 @@ def _make_prediction_function(model_object):
     :return: prediction_function: Function defined below.
     """
 
-    # TODO(thunderhoser): This currently works only for dense neural networks.
+    # num_input_dimensions = len(model_object.layers[0].input.get_shape()) - 1
 
     def prediction_function(predictor_matrix):
         """Prediction function itself.
@@ -2269,7 +2266,7 @@ def _make_prediction_function(model_object):
         :return: event_probabilities: 1-D numpy array of event probabilities.
         """
 
-        return apply_dense_net(
+        return apply_neural_net(
             model_object=model_object,
             predictor_matrix=predictor_matrix,
             num_examples_per_batch=1024, verbose=False
@@ -2283,7 +2280,7 @@ def _run_backwards_test_one_step(
         prediction_function, permuted_flags, cost_function, num_bootstrap_reps):
     """Runs one step of the backwards permutation test.
 
-    :param predictor_matrix: See doc for `_run_forward_test_one_step`.
+    :param predictor_matrix: See doc for `_run_forward_test`.
     :param clean_predictor_matrix: Clean version of `predictor_matrix` (with no
         values permuted).
     :param target_classes: See doc for `_run_forward_test_one_step`.
@@ -2308,7 +2305,7 @@ def _run_backwards_test_one_step(
         return None
 
     # Housekeeping.
-    num_predictors = predictor_matrix.shape[1]
+    num_predictors = predictor_matrix.shape[-1]
     depermuted_predictor_indices = []
     depermuted_cost_matrix = numpy.full((0, num_bootstrap_reps), numpy.nan)
 
@@ -2390,16 +2387,19 @@ def negative_auc_function(observed_labels, forecast_probabilities):
 
 
 def run_forward_test(
-        predictor_table, target_classes, model_object,
+        predictor_matrix, predictor_names, target_classes, model_object,
         cost_function=negative_auc_function,
         num_bootstrap_reps=DEFAULT_NUM_BOOTSTRAP_REPS):
     """Runs forward version of permutation test (both single- and multi-pass).
 
+    E = number of examples
     B = number of bootstrap replicates
     P = number of predictor variables
 
-    :param predictor_table: See doc for `read_tabular_file`.
-    :param target_classes: See doc for `_run_forward_test_one_step`.
+    :param predictor_matrix: numpy array of predictor values.  The first axis
+        must have length E, and the last axis must have length P.
+    :param predictor_names: length-P list of predictor names.
+    :param target_classes: length-E numpy array of classes (integers in 0...1).
     :param model_object: Trained model (instance of `keras.models.Model` or
         `keras.models.Sequential`).
     :param cost_function: See doc for `_run_forward_test_one_step`.
@@ -2424,9 +2424,6 @@ def run_forward_test(
     num_bootstrap_reps = numpy.maximum(num_bootstrap_reps, 1)
     prediction_function = _make_prediction_function(model_object)
 
-    predictor_matrix = predictor_table.to_numpy()
-    predictor_names = list(predictor_table)
-
     # Find original cost (before permutation).
     print('Finding original cost (before permutation)...')
     orig_cost_estimates = _bootstrap_cost(
@@ -2436,7 +2433,7 @@ def run_forward_test(
     )
 
     # Do dirty work.
-    num_predictors = predictor_matrix.shape[1]
+    num_predictors = predictor_matrix.shape[-1]
     permuted_flags = numpy.full(num_predictors, False, dtype=bool)
 
     best_predictor_names = []
@@ -2501,7 +2498,7 @@ def run_forward_test(
 
 
 def run_backwards_test(
-        predictor_table, target_classes, model_object,
+        predictor_matrix, predictor_names, target_classes, model_object,
         cost_function=negative_auc_function,
         num_bootstrap_reps=DEFAULT_NUM_BOOTSTRAP_REPS):
     """Runs backwards version of permutation test (both single- and multi-pass).
@@ -2509,7 +2506,8 @@ def run_backwards_test(
     B = number of bootstrap replicates
     P = number of predictor variables
 
-    :param predictor_table: See doc for `run_forward_test`.
+    :param predictor_matrix: See doc for `run_forward_test`.
+    :param predictor_names: Same.
     :param target_classes: Same.
     :param model_object: Same.
     :param cost_function: Same.
@@ -2531,9 +2529,6 @@ def run_backwards_test(
 
     num_bootstrap_reps = numpy.maximum(num_bootstrap_reps, 1)
     prediction_function = _make_prediction_function(model_object)
-
-    predictor_matrix = predictor_table.to_numpy()
-    predictor_names = list(predictor_table)
 
     clean_predictor_matrix = predictor_matrix + 0.
     num_predictors = len(predictor_names)
