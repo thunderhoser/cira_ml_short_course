@@ -151,7 +151,7 @@ def plot_linear_colour_bar(
         vmin=min_value, vmax=max_value, clip=False
     )
 
-    return plot_colour_bar(
+    colour_bar_object = plot_colour_bar(
         axes_object_or_matrix=axes_object_or_matrix, data_values=data_values,
         colour_map_object=colour_map_object,
         colour_norm_object=colour_norm_object,
@@ -159,6 +159,13 @@ def plot_linear_colour_bar(
         plot_min_arrow=plot_min_arrow, plot_max_arrow=plot_max_arrow,
         fraction_of_axis_length=fraction_of_axis_length, font_size=font_size
     )
+
+    tick_values = colour_bar_object.get_ticks()
+    tick_strings = ['{0:.1g}'.format(v) for v in tick_values]
+    colour_bar_object.set_ticks(tick_values)
+    colour_bar_object.set_ticklabels(tick_strings)
+
+    return colour_bar_object
 
 
 def plot_scalar_field_2d(
