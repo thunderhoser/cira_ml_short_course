@@ -15,6 +15,7 @@ import tensorflow.keras as tf_keras
 import tensorflow.keras.layers as layers
 import tensorflow.python.keras.backend as K
 from scipy.interpolate import interp1d
+from scipy.ndimage.filters import gaussian_filter
 from scipy.spatial.distance import cdist
 from scipy.cluster.hierarchy import linkage, dendrogram
 from sklearn.metrics import roc_auc_score
@@ -663,6 +664,21 @@ def _mkdir_recursive_if_necessary(directory_name=None, file_name=None):
             pass
         else:
             raise
+
+
+def apply_gaussian_filter(input_matrix, e_folding_radius_grid_cells):
+    """Applies Gaussian filter to any-dimensional grid.
+
+    :param input_matrix: numpy array with any dimensions.
+    :param e_folding_radius_grid_cells: e-folding radius (num grid cells).
+    :return: output_matrix: numpy array after smoothing (same dimensions as
+        input).
+    """
+
+    assert e_folding_radius_grid_cells >= 0.
+    return gaussian_filter(
+        input_matrix, sigma=e_folding_radius_grid_cells, order=0, mode='nearest'
+    )
 
 
 def create_paneled_figure(
