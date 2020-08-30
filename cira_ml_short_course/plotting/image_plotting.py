@@ -126,7 +126,7 @@ def plot_colour_bar(
     tick_values = colour_bar_object.get_ticks()
     tick_strings = ['{0:.1f}'.format(v) for v in tick_values]
     tick_strings = [
-        s if len(s) < 5 or s.split('.')[1] != '0'
+        s if len(s.replace('-', '')) < 5 or s.split('.')[1] != '0'
         else s.split('.')[0]
         for s in tick_strings
     ]
