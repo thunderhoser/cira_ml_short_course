@@ -308,6 +308,9 @@ def setup_cnn(
         if i + 1 not in numpy.cumsum(conv_block_layer_counts):
             continue
 
+        if i == num_conv_layers - 1:
+            continue
+
         layer_object = _get_2d_pooling_layer(
             num_rows_in_window=2, num_columns_in_window=2,
             num_rows_per_stride=2, num_columns_per_stride=2, do_max_pooling=True
