@@ -136,7 +136,7 @@ def setup_upconvnet(
     num_input_channels = input_dimensions[2]
 
     input_layer_object = keras.layers.Input(
-        shape=(numpy.sum(input_dimensions),)
+        shape=(numpy.prod(input_dimensions),)
     )
     regularizer_object = utils._get_weight_regularizer(
         l1_weight=l1_weight, l2_weight=l2_weight
