@@ -102,7 +102,7 @@ def setup_upconvnet(
         should be (num_grid_rows, num_grid_columns, num_channels).
     :param conv_block_layer_counts: length-B numpy array with number of
         convolutional layers in each block.  Remember that each conv block
-        upsamples the image by a factor of 2.
+        except the last upsamples the image by a factor of 2.
     :param conv_layer_channel_counts: length-C numpy array with number of
         channels (filters) produced by each convolutional layer.
     :param conv_layer_dropout_rates: length-C numpy array of dropout rates.  To
@@ -147,7 +147,10 @@ def setup_upconvnet(
     )(input_layer_object)
 
     for i in range(num_conv_layers):
-        if i + 1 in numpy.cumsum(conv_block_layer_counts):
+        if (
+                i + 1 in numpy.cumsum(conv_block_layer_counts)
+                and i != num_conv_layers - 1
+        ):
             if use_transposed_conv:
                 layer_object = _get_transposed_conv_layer(
                     num_rows_in_filter=conv_layer_filter_sizes[i],
