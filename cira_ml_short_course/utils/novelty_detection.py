@@ -101,6 +101,7 @@ def _fit_svd(baseline_feature_matrix, test_feature_matrix,
     eigenvalues = eigenvalues ** 2
 
     explained_variances = eigenvalues / numpy.sum(eigenvalues)
+    print(explained_variances)
     cumulative_explained_variances = numpy.cumsum(explained_variances)
 
     fraction_of_variance_to_keep = 0.01 * percent_variance_to_keep
@@ -330,8 +331,6 @@ def run_novelty_detection(
         for i in range(num_trial_examples):
             if i in novel_indices:
                 continue
-
-            print(i)
 
             trial_feature_matrix_svd[i, ...] = _apply_svd(
                 feature_vector=trial_feature_matrix[i, ...],
