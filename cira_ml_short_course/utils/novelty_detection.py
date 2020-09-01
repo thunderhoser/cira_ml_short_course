@@ -236,7 +236,7 @@ def _plot_novelty_maps(novelty_matrix, predictor_names, max_temp_diff_kelvins,
 def run_novelty_detection(
         baseline_predictor_matrix_norm, trial_predictor_matrix_norm,
         cnn_model_object, cnn_feature_layer_name, upconvnet_model_object,
-        num_novel_examples, multipass=False, percent_variance_to_keep=97.5):
+        num_novel_examples, multipass=False, percent_variance_to_keep=100.):
     """Runs novelty detection.
 
     B = number of baseline examples
