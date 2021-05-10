@@ -2991,3 +2991,143 @@ def run_pmm_many_variables(field_matrix, max_percentile_level=99.):
         )
 
     return mean_field_matrix
+
+
+def get_j_measure(
+        predictor_values_positive, predictor_values_negative,
+        max_percentile_level, num_bins, min_examples_per_bin):
+    """Computes J-measure for one predictor variable.
+
+    P = number of positive examples, with predictand of 1
+    N = number of negative examples, with predictand of 0
+
+    :param predictor_values_positive: length-P numpy array of predictor values
+        for positive examples.
+    :param predictor_values_negative: length-N numpy array of predictor values
+        for negative examples.
+    :param max_percentile_level: Maximum percentile of predictor values to
+        include in J-measure.  For example, if `max_percentile` is 99, values
+        included will span the 1st to 99th percentiles.
+    :param num_bins: Number of bins used to compute J-measure.
+    :param min_examples_per_bin: Minimum number of examples per bin (in both the
+        positive and negative distributions).  Will merge bins to meet this
+        criterion.
+    :return: j_measure: J-measure (scalar).
+    """
+
+    assert not numpy.any(numpy.isnan(predictor_values_positive))
+    assert len(predictor_values_positive.shape) == 1
+
+    assert not numpy.any(numpy.isnan(predictor_values_negative))
+    assert len(predictor_values_negative.shape) == 1
+
+    assert max_percentile_level >= 90.
+    assert max_percentile_level <= 100.
+
+    num_bins = int(numpy.round(num_bins))
+    assert num_bins >= 10
+
+    min_examples_per_bin = int(numpy.round(min_examples_per_bin))
+    assert min_examples_per_bin >= 10
+
+    all_predictor_values = numpy.concatenate((
+        predictor_values_positive, predictor_values_negative
+    ))
+    min_value_for_bins = numpy.percentile(
+        all_predictor_values, 100 - max_percentile_level
+    )
+    max_value_for_bins = numpy.percentile(
+        all_predictor_values, max_percentile_level
+    )
+    bin_cutoffs = numpy.linspace(
+        min_value_for_bins, max_value_for_bins, num=num_bins + 1
+    )
+
+    bin_indices_positive = (
+        numpy.digitize(predictor_values_positive, bin_cutoffs, right=False) - 1
+    )
+    bin_indices_negative = (
+        numpy.digitize(predictor_values_negative, bin_cutoffs, right=False) - 1
+    )
+
+    num_pos_examples_by_component = []
+    num_neg_examples_by_component = []
+    positive_fraction_by_component = []
+    negative_fraction_by_component = []
+
+    pos_example_indices_this_component = numpy.array([], dtype=int)
+    neg_example_indices_this_component = numpy.array([], dtype=int)
+
+    for k in range(num_bins):
+        pos_example_indices_this_component = numpy.concatenate((
+            pos_example_indices_this_component,
+            numpy.where(bin_indices_positive == k)[0]
+        ))
+        neg_example_indices_this_component = numpy.concatenate((
+            neg_example_indices_this_component,
+            numpy.where(bin_indices_negative == k)[0]
+        ))
+
+        if (
+                len(pos_example_indices_this_component) < min_examples_per_bin
+                and k != num_bins - 1
+        ):
+            continue
+
+        if (
+                len(neg_example_indices_this_component) < min_examples_per_bin
+                and k != num_bins - 1
+        ):
+            continue
+
+        num_pos_examples_by_component.append(
+            len(pos_example_indices_this_component)
+        )
+        num_neg_examples_by_component.append(
+            len(neg_example_indices_this_component)
+        )
+        positive_fraction_by_component.append(
+            float(len(pos_example_indices_this_component)) /
+            len(predictor_values_positive)
+        )
+        negative_fraction_by_component.append(
+            float(len(neg_example_indices_this_component)) /
+            len(predictor_values_negative)
+        )
+
+        pos_example_indices_this_component = numpy.array([], dtype=int)
+        neg_example_indices_this_component = numpy.array([], dtype=int)
+
+    num_pos_examples_by_component = numpy.array(
+        num_pos_examples_by_component, dtype=int
+    )
+    num_neg_examples_by_component = numpy.array(
+        num_neg_examples_by_component, dtype=int
+    )
+    positive_fraction_by_component = numpy.array(positive_fraction_by_component)
+    negative_fraction_by_component = numpy.array(negative_fraction_by_component)
+
+    if (
+            num_pos_examples_by_component[-1] < min_examples_per_bin or
+            num_neg_examples_by_component[-1] < min_examples_per_bin
+    ):
+        positive_fraction_by_component[-2] = numpy.average(
+            positive_fraction_by_component[-2:],
+            weights=num_pos_examples_by_component[-2:]
+        )
+        negative_fraction_by_component[-2] = numpy.average(
+            negative_fraction_by_component[-2:],
+            weights=num_neg_examples_by_component[-2:]
+        )
+
+        positive_fraction_by_component = positive_fraction_by_component[:-1]
+        negative_fraction_by_component = negative_fraction_by_component[:-1]
+
+    j_measure_components = (
+        (negative_fraction_by_component - positive_fraction_by_component) *
+        numpy.log2(
+            negative_fraction_by_component / positive_fraction_by_component
+        )
+    )
+
+    return numpy.sum(j_measure_components)
