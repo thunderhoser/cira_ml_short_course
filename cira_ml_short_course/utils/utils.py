@@ -3131,3 +3131,44 @@ def get_j_measure(
     )
 
     return numpy.sum(j_measure_components)
+
+
+def plot_j_measures(j_measures, predictor_names):
+    """Plots J-measures.
+
+    P = number of predictor variables
+
+    :param j_measures: length-P numpy array of J-measures.
+    :param predictor_names: length-P list of predictor names.
+    """
+
+    num_predictors = len(predictor_names)
+    y_coords = numpy.linspace(
+        0, num_predictors - 1, num=num_predictors, dtype=float
+    )
+
+    _, axes_object = pyplot.subplots(
+        1, 1, figsize=(FIGURE_WIDTH_INCHES, FIGURE_HEIGHT_INCHES)
+    )
+
+    axes_object.barh(
+        y_coords, j_measures, color=BAR_GRAPH_COLOUR,
+        edgecolor=BAR_GRAPH_COLOUR, linewidth=BAR_GRAPH_EDGE_WIDTH
+    )
+
+    pyplot.xlabel(r'$J$-measure')
+    pyplot.ylabel('Predictor variable')
+
+    pyplot.yticks([], [])
+    x_tick_values, _ = pyplot.xticks()
+    pyplot.xticks(x_tick_values, rotation=90)
+
+    x_max = numpy.percentile(j_measures, 99.)
+    pyplot.xlim([0., x_max])
+
+    for j in range(num_predictors):
+        axes_object.text(
+            0, y_coords[j], predictor_names[j], color=BAR_GRAPH_FONT_COLOUR,
+            horizontalalignment='left', verticalalignment='center',
+            fontsize=BAR_GRAPH_FONT_SIZE
+        )
