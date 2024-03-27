@@ -976,18 +976,16 @@ def setup_linear_regression(lambda1=0., lambda2=0.):
     assert lambda2 >= 0
 
     if lambda1 < LAMBDA_TOLERANCE and lambda2 < LAMBDA_TOLERANCE:
-        return LinearRegression(fit_intercept=True, normalize=False)
+        return LinearRegression(fit_intercept=True)
 
     if lambda1 < LAMBDA_TOLERANCE:
         return Ridge(
-            alpha=lambda2, fit_intercept=True, normalize=False,
-            random_state=RANDOM_SEED
+            alpha=lambda2, fit_intercept=True, random_state=RANDOM_SEED
         )
 
     if lambda2 < LAMBDA_TOLERANCE:
         return Lasso(
-            alpha=lambda1, fit_intercept=True, normalize=False,
-            random_state=RANDOM_SEED
+            alpha=lambda1, fit_intercept=True, random_state=RANDOM_SEED
         )
 
     alpha, l1_ratio = _lambdas_to_sklearn_inputs(
@@ -995,7 +993,7 @@ def setup_linear_regression(lambda1=0., lambda2=0.):
     )
 
     return ElasticNet(
-        alpha=alpha, l1_ratio=l1_ratio, fit_intercept=True, normalize=False,
+        alpha=alpha, l1_ratio=l1_ratio, fit_intercept=True,
         random_state=RANDOM_SEED
     )
 
