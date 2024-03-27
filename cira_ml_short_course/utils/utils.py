@@ -1946,11 +1946,9 @@ def setup_dense_net(
     )
 
     model_object.compile(
-        # loss=keras.losses.binary_crossentropy,
-        loss=keras.losses.BinaryCrossentropy(),
-        optimizer=keras.optimizers.Adam(),
-        # metrics=METRIC_FUNCTION_LIST,
-        metrics=[]
+        loss=keras.losses.binary_crossentropy,
+        optimizer='adam',
+        metrics=METRIC_FUNCTION_LIST
     )
 
     model_object.summary()
