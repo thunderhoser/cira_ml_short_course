@@ -1311,7 +1311,7 @@ def setup_logistic_regression(lambda1=0., lambda2=0.):
 
     if lambda1 < LAMBDA_TOLERANCE and lambda2 < LAMBDA_TOLERANCE:
         return SGDClassifier(
-            loss='log', penalty='none', fit_intercept=True, verbose=0,
+            loss='log', penalty=None, fit_intercept=True, verbose=0,
             random_state=RANDOM_SEED
         )
 
