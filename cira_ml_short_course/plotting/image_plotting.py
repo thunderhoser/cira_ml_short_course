@@ -199,13 +199,17 @@ def plot_scalar_field_2d(
             1, 1, figsize=(DEFAULT_FIG_WIDTH_INCHES, DEFAULT_FIG_HEIGHT_INCHES)
         )
 
-    if colour_norm_object is not None:
+    if colour_norm_object is None:
+        colour_norm_object = matplotlib.colors.Normalize(
+            vmin=min_colour_value, vmax=max_colour_value, clip=False
+        )
+    else:
         min_colour_value = colour_norm_object.boundaries[0]
         max_colour_value = colour_norm_object.boundaries[-1]
 
     axes_object.pcolormesh(
         predictor_matrix, cmap=colour_map_object, norm=colour_norm_object,
-        vmin=min_colour_value, vmax=max_colour_value,
+        # vmin=min_colour_value, vmax=max_colour_value,
         shading='flat', edgecolors='None'
     )
 
