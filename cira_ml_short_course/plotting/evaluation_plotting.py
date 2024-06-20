@@ -1,9 +1,8 @@
 """Plotting methods for model evaluation."""
 
 import numpy
-import shapely.geometry
-from descartes import PolygonPatch
 import matplotlib.colors
+import matplotlib.patches
 from matplotlib import pyplot
 
 CSI_LEVELS = numpy.linspace(0, 1, num=11, dtype=float)
@@ -194,21 +193,21 @@ def _plot_attr_diagram_background(
         ZERO_SKILL_LINE_COLOUR, POSITIVE_SKILL_AREA_OPACITY
     )
 
-    this_list = _vertex_arrays_to_list(
-        vertex_x_coords=x_coords_left, vertex_y_coords=y_coords_left
-    )
-    left_polygon_object = shapely.geometry.Polygon(shell=this_list)
-    left_patch_object = PolygonPatch(
-        left_polygon_object, lw=0, ec=skill_area_colour, fc=skill_area_colour
+    left_polygon_coord_matrix = numpy.transpose(numpy.vstack((
+        x_coords_left, y_coords_left
+    )))
+    left_patch_object = matplotlib.patches.Polygon(
+        left_polygon_coord_matrix, lw=0,
+        ec=skill_area_colour, fc=skill_area_colour
     )
     axes_object.add_patch(left_patch_object)
 
-    this_list = _vertex_arrays_to_list(
-        vertex_x_coords=x_coords_right, vertex_y_coords=y_coords_right
-    )
-    right_polygon_object = shapely.geometry.Polygon(shell=this_list)
-    right_patch_object = PolygonPatch(
-        right_polygon_object, lw=0, ec=skill_area_colour, fc=skill_area_colour
+    right_polygon_coord_matrix = numpy.transpose(numpy.vstack((
+        x_coords_right, y_coords_right
+    )))
+    right_patch_object = matplotlib.patches.Polygon(
+        right_polygon_coord_matrix, lw=0,
+        ec=skill_area_colour, fc=skill_area_colour
     )
     axes_object.add_patch(right_patch_object)
 
