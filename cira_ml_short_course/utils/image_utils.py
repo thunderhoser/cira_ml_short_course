@@ -2,6 +2,7 @@
 
 import copy
 import glob
+import h5py
 import os.path
 import numpy
 import netCDF4
@@ -37,6 +38,70 @@ PREDICTOR_NAMES_KEY = 'predictor_names'
 PREDICTOR_MATRIX_KEY = 'predictor_matrix'
 TARGET_NAME_KEY = 'target_name'
 TARGET_MATRIX_KEY = 'target_matrix'
+
+
+def __rescue_netcdf3_file(netcdf3_file_name):
+    """Rescues NetCDF3 file by reading it with h5py.
+
+    This is necessary if the NetCDF3 file is old enough that it is no longer
+    compatible with the modern version of the `netCDF4` library.
+
+    :param netcdf3_file_name: Path to input file.
+    :return: dataset_object: Instance of `netCDF4.Dataset`.
+    """
+
+    dataset_object = netCDF4.Dataset(
+        'in_memory_dataset', mode='w', diskless=True, persist=True
+    )
+
+    with h5py.File(netcdf3_file_name, 'r') as hdf5_file_handle:
+
+        # First, copy dimensions to `netCDF4.Dataset` object.
+        for variable_name, variable_record in hdf5_file_handle.items():
+            if 'DIMENSION_LIST' in variable_record.attrs:
+                continue
+
+            dimension_length = (
+                variable_record.shape[0] if len(variable_record.shape) > 0
+                else 1
+            )
+            dataset_object.createDimension(variable_name, dimension_length)
+
+        # Next, copy variables to `netCDF4.Dataset` object.
+        for variable_name, variable_record in hdf5_file_handle.items():
+            if 'DIMENSION_LIST' not in variable_record.attrs:
+                continue
+
+            if (
+                    variable_name == 'time' or
+                    variable_name.startswith('track_') or
+                    variable_name.startswith('centroid_')
+            ):
+                dimension_names = ('p',)
+            else:
+                dimension_names = ('p', 'row', 'col')
+
+            new_variable_record = dataset_object.createVariable(
+                variable_name,
+                datatype=variable_record.dtype,
+                dimensions=dimension_names
+            )
+            new_variable_record[:] = variable_record[:]
+
+            for attribute_name, attribute_value in variable_record.attrs.items():
+                if attribute_name == 'DIMENSION_LIST':
+                    continue
+
+                new_variable_record.setncattr(attribute_name, attribute_value)
+
+        # Finally, copy global attributes.
+        for attribute_name, attribute_value in hdf5_file_handle.attrs.items():
+            if attribute_name == '_NCProperties':
+                continue
+
+            dataset_object.setncattr(attribute_name, attribute_value)
+
+    return dataset_object
 
 
 def _file_name_to_date(netcdf_file_name):
@@ -113,7 +178,10 @@ def read_file(netcdf_file_name):
     image_dict['target_matrix']: E-by-M-by-N numpy array of target values.
     """
 
-    dataset_object = netCDF4.Dataset(netcdf_file_name)
+    try:
+        dataset_object = netCDF4.Dataset(netcdf_file_name)
+    except:
+        dataset_object = __rescue_netcdf3_file(netcdf_file_name)
 
     storm_id_nums = numpy.array(
         dataset_object.variables[STORM_ID_NAME_ORIG][:], dtype=int
